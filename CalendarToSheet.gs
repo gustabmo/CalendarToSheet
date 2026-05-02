@@ -454,9 +454,11 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
     [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
-    var col = 2 + i * 2;   // cols 2,4 for badges; 3,5 for text
-    sheet.getRange(legendRow, col, 1, 2).setBackground(item[0]);
-    sheet.getRange(legendRow, col).setValue(item[1]).setFontSize(7);
+    var col = 2 + i;   // cols 2, 3
+    sheet.getRange(legendRow, col)
+      .setValue(item[1]).setFontSize(7)
+      .setBackground(item[0])
+      .setHorizontalAlignment("center").setVerticalAlignment("middle");
   });
 
   // "Dernière mise à jour" — timestamp of this tab's generation
@@ -465,7 +467,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   var timestamp = now.getFullYear() + "-" + pad(now.getMonth()+1) + "-" + pad(now.getDate()) +
                   " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
   // Place it after the two badges (col 6) — leaves space regardless of NUM_MONTHS
-  var tsCol = Math.max(6, NUM_COLS - 3);
+  var tsCol = Math.max(5, NUM_COLS - 3);
   sheet.getRange(legendRow, tsCol, 1, NUM_COLS - tsCol + 1).merge()
     .setValue("Dernière mise à jour : " + timestamp)
     .setFontSize(8).setFontStyle("italic").setFontColor("#888888")
