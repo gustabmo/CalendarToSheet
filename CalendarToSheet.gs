@@ -241,6 +241,13 @@ function isEventVisible_(evt, viewCfg) {
 // GÉNÈRE UN ONGLET
 // Efface le contenu et reformate l'onglet existant (sans le supprimer, pour
 // préserver l'URL de publication web). Crée l'onglet s'il n'existe pas encore.
+//
+// Stratégie de performance : toutes les propriétés de cellule sont d'abord
+// calculées en mémoire dans des tableaux 2D, puis écrites en un minimum
+// d'appels batch à l'API Sheets (setValues, setBackgrounds, setFontSizes,
+// setFontWeights, setHorizontalAlignments, setVerticalAlignments,
+// setFontColors, setWraps). Cela réduit les appels API de plusieurs milliers
+// à une dizaine, ce qui est le principal levier de performance sur Apps Script.
 // ============================================================================
 function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // ── Récupère ou crée l'onglet sans le supprimer ──────────────────────────
@@ -256,53 +263,97 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     sheet = ss.insertSheet(sheetName);
   }
 
-  var months    = buildMonthList_(year.start, year.end);
+  var months     = buildMonthList_(year.start, year.end);
   var NUM_MONTHS = months.length;
+  var NUM_COLS   = NUM_MONTHS * 2;
   var DAY_ROWS   = 31;
-  var TITLE_ROW  = 1;
+  var TITLE_ROW  = 1;   // 1-indexed for Sheets API
   var HEADER_ROW = 2;
   var DATA_START = 3;
+  // Total rows in our managed area: title(1) + header(1) + data(31)
+  var TOTAL_ROWS = 1 + 1 + DAY_ROWS;
 
-  // Hauteurs de lignes
+  // ── Hauteurs de lignes (peu d'appels, pas de gain à batcher) ────────────
   sheet.setRowHeight(TITLE_ROW,  28);
   sheet.setRowHeight(HEADER_ROW, 20);
   for (var r = DATA_START; r < DATA_START + DAY_ROWS; r++) {
     sheet.setRowHeight(r, 18);
   }
 
-  // Titre
-  sheet.getRange(TITLE_ROW, 1, 1, NUM_MONTHS * 2).merge()
-    .setValue(sheetName)
-    .setFontSize(13)
-    .setFontWeight("bold")
-    .setHorizontalAlignment("center")
-    .setVerticalAlignment("middle")
-    .setBackground("#FFFFFF");
+  // ── Largeurs de colonnes ─────────────────────────────────────────────────
+  for (var m = 0; m < NUM_MONTHS; m++) {
+    sheet.setColumnWidth(m * 2 + 1, 26);
+    sheet.setColumnWidth(m * 2 + 2, 88);
+  }
 
-  // Colonnes par mois
+  // ── Initialise les tableaux 2D (indexés [rowIndex][colIndex], 0-based) ──
+  // Couvrent les lignes TITLE_ROW … DATA_START+DAY_ROWS-1
+  var values     = [];   // cell text / number
+  var backgrounds= [];   // background colour string
+  var fontSizes  = [];   // font size (pt)
+  var fontWeights= [];   // "bold" | "normal"
+  var hAligns    = [];   // "left" | "center" | "right"
+  var vAligns    = [];   // "top" | "middle" | "bottom"
+  var fontColors = [];   // foreground colour string
+  var wraps      = [];   // true | false
+
+  for (var ri = 0; ri < TOTAL_ROWS; ri++) {
+    values[ri]      = [];
+    backgrounds[ri] = [];
+    fontSizes[ri]   = [];
+    fontWeights[ri] = [];
+    hAligns[ri]     = [];
+    vAligns[ri]     = [];
+    fontColors[ri]  = [];
+    wraps[ri]       = [];
+    for (var ci = 0; ci < NUM_COLS; ci++) {
+      values[ri][ci]      = "";
+      backgrounds[ri][ci] = null;      // null = keep default
+      fontSizes[ri][ci]   = 10;
+      fontWeights[ri][ci] = "normal";
+      hAligns[ri][ci]     = "left";
+      vAligns[ri][ci]     = "middle";
+      fontColors[ri][ci]  = "#000000";
+      wraps[ri][ci]       = false;
+    }
+  }
+
+  // Row 0 = TITLE_ROW, Row 1 = HEADER_ROW, Rows 2…32 = data days
+  var TITLE_RI  = 0;
+  var HEADER_RI = 1;
+
+  // ── Ligne de titre (sera fusionnée après le batch) ───────────────────────
+  values[TITLE_RI][0]      = sheetName;
+  fontSizes[TITLE_RI][0]   = 13;
+  fontWeights[TITLE_RI][0] = "bold";
+  hAligns[TITLE_RI][0]     = "center";
+  vAligns[TITLE_RI][0]     = "middle";
+  backgrounds[TITLE_RI][0] = "#FFFFFF";
+
+  // ── Calcul des cellules par mois ─────────────────────────────────────────
   for (var m = 0; m < NUM_MONTHS; m++) {
     var mo      = months[m];
-    var colDay  = m * 2 + 1;
-    var colEvt  = colDay + 1;
+    var colDay  = m * 2;        // 0-based column index for the day number
+    var colEvt  = colDay + 1;   // 0-based column index for the event text
 
-    // En-tête de mois
-    sheet.getRange(HEADER_ROW, colDay, 1, 2).merge()
-      .setValue(mo.label)
-      .setFontWeight("bold")
-      .setFontSize(10)
-      .setBackground(COLOR_HEADER_BG)
-      .setFontColor(COLOR_HEADER_FG)
-      .setHorizontalAlignment("center")
-      .setVerticalAlignment("middle");
+    // En-tête de mois (HEADER_ROW, sera fusionné après le batch)
+    values[HEADER_RI][colDay]      = mo.label;
+    fontWeights[HEADER_RI][colDay] = "bold";
+    fontSizes[HEADER_RI][colDay]   = 10;
+    backgrounds[HEADER_RI][colDay] = COLOR_HEADER_BG;
+    fontColors[HEADER_RI][colDay]  = COLOR_HEADER_FG;
+    hAligns[HEADER_RI][colDay]     = "center";
+    vAligns[HEADER_RI][colDay]     = "middle";
 
     var daysInMonth = new Date(mo.year, mo.month + 1, 0).getDate();
 
     for (var d = 1; d <= DAY_ROWS; d++) {
-      var row = DATA_START + d - 1;
+      var ri  = HEADER_RI + d;   // data row index (0-based)
 
       if (d > daysInMonth) {
-        sheet.getRange(row, colDay, 1, 2)
-          .setValue("").setBackground(COLOR_NODAY_BG);
+        // Jour inexistant (ex. 31 dans un mois de 30 jours)
+        backgrounds[ri][colDay] = COLOR_NODAY_BG;
+        backgrounds[ri][colEvt] = COLOR_NODAY_BG;
         continue;
       }
 
@@ -317,66 +368,79 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
         return isEventVisible_(e, viewCfg);
       });
 
-      // Sépare vacances et événements ordinaires
-      var vacEvts    = dayEvts.filter(function(e){ return e.isVacance; });
+      var vacEvts    = dayEvts.filter(function(e){ return  e.isVacance; });
       var normalEvts = dayEvts.filter(function(e){ return !e.isVacance; });
 
-      // ---- Couleur de fond -----------------------------------------------
-      // Priorité décroissante : week-end > vacances GE > vacances école
-      // (Le week-end prime sur tout : même en vacances, les samedis/dimanches
-      //  restent bleus pour garder la lisibilité de la grille.)
+      // ---- Couleur de fond (priorité : week-end > GE > école) -------------
       var isSchoolVac = vacEvts.length > 0;
       var bg = null;
-      if      (isWeekend)    bg = COLOR_WEEKEND;
-      else if (isGeVac)      bg = COLOR_GE_VACATION;
-      else if (isSchoolVac)  bg = COLOR_OWN_VACATION;
+      if      (isWeekend)   bg = COLOR_WEEKEND;
+      else if (isGeVac)     bg = COLOR_GE_VACATION;
+      else if (isSchoolVac) bg = COLOR_OWN_VACATION;
 
-      if (bg) sheet.getRange(row, colDay, 1, 2).setBackground(bg);
+      if (bg) {
+        backgrounds[ri][colDay] = bg;
+        backgrounds[ri][colEvt] = bg;
+      }
 
       // ---- Numéro du jour --------------------------------------------------
-      sheet.getRange(row, colDay)
-        .setValue(d)
-        .setFontSize(8)
-        .setHorizontalAlignment("left")
-        .setVerticalAlignment("middle");
+      values[ri][colDay]     = d;
+      fontSizes[ri][colDay]  = 8;
+      hAligns[ri][colDay]    = "left";
+      vAligns[ri][colDay]    = "middle";
 
       // ---- Texte de l'événement --------------------------------------------
       var textParts = [];
 
-      // Vacances : affiche le titre uniquement sur le premier jour non-week-end
-      // du mois (ou le premier jour non-week-end de la vacation dans ce mois).
       if (vacEvts.length > 0) {
         if (isFirstWeekdayOfVacInMonth_(dateObj, vacEvts[0], mo.month)) {
           textParts.push(vacEvts[0].displayTitle);
         }
       }
-
-      // Événements normaux : toujours affichés
       normalEvts.forEach(function(e){ textParts.push(e.displayTitle); });
 
       if (textParts.length > 0) {
-        var text     = textParts.join(" / ");
-        var fontSize = fontSizeForLength_(text.length);
-        sheet.getRange(row, colEvt)
-          .setValue(text)
-          .setFontSize(fontSize)
-          .setWrap(true)
-          .setHorizontalAlignment("left")
-          .setVerticalAlignment("middle");
-      } else {
-        sheet.getRange(row, colEvt).setValue("");
+        var text = textParts.join(" / ");
+        values[ri][colEvt]     = text;
+        fontSizes[ri][colEvt]  = fontSizeForLength_(text.length);
+        wraps[ri][colEvt]      = true;
+        hAligns[ri][colEvt]    = "left";
+        vAligns[ri][colEvt]    = "middle";
       }
     }
-
-    sheet.setColumnWidth(colDay,  26);
-    sheet.setColumnWidth(colEvt,  88);
   }
 
-  // Bordures
-  sheet.getRange(DATA_START, 1, DAY_ROWS, NUM_MONTHS * 2)
+  // ── Écriture batch dans la feuille ───────────────────────────────────────
+  // Un seul bloc couvre toutes les lignes gérées (titre + en-tête + données).
+  var dataRange = sheet.getRange(TITLE_ROW, 1, TOTAL_ROWS, NUM_COLS);
+  dataRange.setValues(values);
+  dataRange.setFontSizes(fontSizes);
+  dataRange.setFontWeights(fontWeights);
+  dataRange.setHorizontalAlignments(hAligns);
+  dataRange.setVerticalAlignments(vAligns);
+  dataRange.setFontColors(fontColors);
+  dataRange.setWraps(wraps);
+
+  // setBackgrounds ne peut pas recevoir null (contrairement aux autres setters
+  // qui acceptent les valeurs par défaut). On remplace les null par la couleur
+  // blanche ("") pour les cellules sans couleur spécifique, puis on applique.
+  var bgClean = backgrounds.map(function(row) {
+    return row.map(function(c) { return c || "white"; });
+  });
+  dataRange.setBackgrounds(bgClean);
+
+  // ── Fusions (doit se faire après setValues) ──────────────────────────────
+  sheet.getRange(TITLE_ROW, 1, 1, NUM_COLS).merge();
+  for (var m = 0; m < NUM_MONTHS; m++) {
+    sheet.getRange(HEADER_ROW, m * 2 + 1, 1, 2).merge();
+  }
+
+  // ── Bordures (une seule plage) ────────────────────────────────────────────
+  sheet.getRange(DATA_START, 1, DAY_ROWS, NUM_COLS)
     .setBorder(true, true, true, true, true, true,
                "#CCCCCC", SpreadsheetApp.BorderStyle.SOLID_THIN);
 
+  // ── Légende ───────────────────────────────────────────────────────────────
   // Légende — week-end volontairement omis : le bleu est suffisamment intuitif
   // et sa présence alourdirait la légende sans apporter d'information utile.
   var legendRow = DATA_START + DAY_ROWS + 1;
