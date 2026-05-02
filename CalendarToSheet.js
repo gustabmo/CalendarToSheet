@@ -1,4 +1,7 @@
-// 2026-05-02 by Gustavo Exel and claude.ai
+// 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel and claude.ai
+
+// Goal: to creat several different versions of yearly calendars based on events that 
+// are on google calendars Public / Parents / Profs
 
 // =============================================================================
 // CALENDRIER SCOLAIRE — Google Apps Script  v4
@@ -445,33 +448,36 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   var legendRow = DATA_START + DAY_ROWS + 1;
   sheet.setRowHeight(legendRow, 16);
 
+  let nextCol=1
+
   // "Légende" label
-  sheet.getRange(legendRow, 1)
-    .setValue("Légende").setFontWeight("bold").setFontSize(9);
+  sheet.getRange(legendRow, nextCol+1)
+    .setValue("Légende :").setFontWeight("bold").setFontSize(9);
+  nextCol += 2;
 
   // Colored badge + label for each vacation type, side by side starting col 2
   [
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
     [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
-    var col = 2 + i;   // cols 2, 3
-    sheet.getRange(legendRow, col)
+    sheet.getRange(legendRow, nextCol )
       .setValue(item[1]).setFontSize(7)
+      .setVerticalAlignment("middle");
+    sheet.getRange(legendRow, nextCol, 1, 2 )
       .setBackground(item[0])
-      .setHorizontalAlignment("center").setVerticalAlignment("middle");
+    nextCol += 2;
   });
 
   // "Dernière mise à jour" — timestamp of this tab's generation
   var now       = new Date();
   var pad       = function(n){ return String(n).padStart(2, "0"); };
-  var timestamp = now.getFullYear() + "-" + pad(now.getMonth()+1) + "-" + pad(now.getDate()) +
+  var timestamp =  pad(now.getDate()) + "-" + pad(now.getMonth()+1) + "-" + now.getFullYear() +
                   " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
-  // Place it after the two badges (col 6) — leaves space regardless of NUM_MONTHS
-  var tsCol = Math.max(5, NUM_COLS - 3);
-  sheet.getRange(legendRow, tsCol, 1, NUM_COLS - tsCol + 1).merge()
+  sheet.getRange(legendRow, nextCol+1)
     .setValue("Dernière mise à jour : " + timestamp)
     .setFontSize(8).setFontStyle("italic").setFontColor("#888888")
-    .setHorizontalAlignment("right").setVerticalAlignment("middle");
+    .setVerticalAlignment("middle");
+  nextCol += 2;
 
   sheet.setFrozenRows(2);
   protectSheet_(sheet);
