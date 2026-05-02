@@ -1,7 +1,7 @@
 // 2026-05-02 by Gustavo Exel and claude.ai
 
 // =============================================================================
-// CALENDRIER SCOLAIRE — Google Apps Script  v3
+// CALENDRIER SCOLAIRE — Google Apps Script  v4
 // À attacher à un fichier Google Sheets.
 // Menu : Calendrier
 //
@@ -32,7 +32,7 @@
 //   Pas de tag niveau   → apparaît sur tous les onglets
 //
 // Vacances GE : récupérées automatiquement depuis ge.ch
-// Couleurs : bleu = week-end, orange foncé = vacances GE, orange clair = vacances école
+// Couleurs (priorité décroissante) : bleu = week-end > orange foncé = vacances GE > orange clair = vacances école
 // ================================================
 
 // ============================================================================
@@ -48,12 +48,14 @@
 //   Clé (col D)             Valeur (col E)
 //   FETCH_GE_VACANCES       TRUE  ou  FALSE
 //
-// ── ANNÉES SCOLAIRES (colonnes G–I) ──────────────────────────────────────
+// ── ANNÉES SCOLAIRES (colonnes G–J) ──────────────────────────────────────
 //   Ligne 1 : en-têtes (ignorés)
 //   Lignes 2+ :
 //     G : Libellé    ex. "2025-26"  → préfixe des noms d'onglets
 //     H : Début      ex. "2025-08-01"
 //     I : Fin        ex. "2026-08-31"
+//     J : Générer    laisser non-vide (ex. "X" ou "OUI") pour l'année à générer
+//                    → exactement UNE ligne doit avoir cette colonne non-vide
 // ============================================================================
 
 // ---- Palette de couleurs ---------------------------------------------------
@@ -90,42 +92,46 @@ var GE_VACATION_BASE = "https://www.ge.ch/vacances-scolaires-jours-feries/vacanc
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Calendrier")
-    .addItem("Générer les onglets pour une année…", "promptGenerateYear")
+    .addItem("Générer les onglets (année marquée dans Config)", "generateMarkedYear")
     .addSeparator()
-    .addItem("Initialiser l'onglet Config",         "setupConfigSheet")
+    .addItem("Initialiser l'onglet Config", "setupConfigSheet")
     .addToUi();
 }
 
 // ============================================================================
-// DIALOGUE DE SÉLECTION D'ANNÉE
+// GÉNÉRATION DEPUIS LA CONFIG (colonne J)
+// Lit la colonne J (index 9) des années scolaires.
+// Exactement une ligne doit avoir une valeur non-vide dans J.
+// Erreur si zéro ou plus d'une ligne est marquée.
 // ============================================================================
-function promptGenerateYear() {
+function generateMarkedYear() {
   var ss     = SpreadsheetApp.getActiveSpreadsheet();
   var config = readConfig_(ss);
   if (!config) return;
 
-  if (config.years.length === 0) {
-    SpreadsheetApp.getUi().alert("Aucune année scolaire trouvée dans l'onglet Config (colonnes G–I).");
+  var ui = SpreadsheetApp.getUi();
+
+  // Filtre les années ayant la colonne "Générer" non-vide
+  var marked = config.years.filter(function(y) { return y.generate; });
+
+  if (marked.length === 0) {
+    ui.alert(
+      "Erreur : aucune année à générer.\n\n" +
+      "Mettez une valeur (ex. « X ») dans la colonne J (Générer) " +
+      "de l'année souhaitée dans l'onglet Config."
+    );
+    return;
+  }
+  if (marked.length > 1) {
+    ui.alert(
+      "Erreur : plusieurs années marquées pour génération (" +
+      marked.map(function(y){ return y.label; }).join(", ") + ").\n\n" +
+      "Ne laissez qu'une seule valeur non-vide dans la colonne J (Générer)."
+    );
     return;
   }
 
-  var labels = config.years.map(function(y){ return y.label; });
-  var ui     = SpreadsheetApp.getUi();
-  var result = ui.prompt(
-    "Générer les onglets",
-    "Entrez le libellé de l'année à générer :\n" + labels.join("  |  "),
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (result.getSelectedButton() !== ui.Button.OK) return;
-
-  var chosen = result.getResponseText().trim();
-  var year   = config.years.filter(function(y){ return y.label === chosen; })[0];
-  if (!year) {
-    ui.alert("Année « " + chosen + " » introuvable dans la Config.");
-    return;
-  }
-
-  generateAllViewsForYear_(ss, year, config);
+  generateAllViewsForYear_(ss, marked[0], config);
 }
 
 // ============================================================================
@@ -208,11 +214,22 @@ function isEventVisible_(evt, viewCfg) {
 
 // ============================================================================
 // GÉNÈRE UN ONGLET
+// Efface le contenu et reformate l'onglet existant (sans le supprimer, pour
+// préserver l'URL de publication web). Crée l'onglet s'il n'existe pas encore.
 // ============================================================================
 function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
-  var existing = ss.getSheetByName(sheetName);
-  if (existing) ss.deleteSheet(existing);
-  var sheet = ss.insertSheet(sheetName);
+  // ── Récupère ou crée l'onglet sans le supprimer ──────────────────────────
+  var sheet = ss.getSheetByName(sheetName);
+  if (sheet) {
+    // Efface contenu, formats et fusions pour repartir à zéro
+    sheet.clearContents();
+    sheet.clearFormats();
+    // Supprime toutes les fusions existantes
+    var merges = sheet.getMergedRanges();
+    merges.forEach(function(r){ r.breakApart(); });
+  } else {
+    sheet = ss.insertSheet(sheetName);
+  }
 
   var months    = buildMonthList_(year.start, year.end);
   var NUM_MONTHS = months.length;
@@ -269,7 +286,6 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       var dow       = dateObj.getDay();
       var isWeekend = dow === 0 || dow === 6;
       var isGeVac   = isInRanges_(dateObj, geVacations);
-      var isFirstDayOfMonth = (d === 1);
 
       // Événements du jour filtrés selon le mode de l'onglet
       var dayEvts = (events[dateKey] || []).filter(function(e){
@@ -280,12 +296,15 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       var vacEvts    = dayEvts.filter(function(e){ return e.isVacance; });
       var normalEvts = dayEvts.filter(function(e){ return !e.isVacance; });
 
-      // ---- Couleur de fond (priorité : GE > propre école > week-end) -------
+      // ---- Couleur de fond -----------------------------------------------
+      // Priorité décroissante : week-end > vacances GE > vacances école
+      // (Le week-end prime sur tout : même en vacances, les samedis/dimanches
+      //  restent bleus pour garder la lisibilité de la grille.)
       var isSchoolVac = vacEvts.length > 0;
       var bg = null;
-      if      (isGeVac)      bg = COLOR_GE_VACATION;
+      if      (isWeekend)    bg = COLOR_WEEKEND;
+      else if (isGeVac)      bg = COLOR_GE_VACATION;
       else if (isSchoolVac)  bg = COLOR_OWN_VACATION;
-      else if (isWeekend)    bg = COLOR_WEEKEND;
 
       if (bg) sheet.getRange(row, colDay, 1, 2).setBackground(bg);
 
@@ -297,13 +316,12 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
         .setVerticalAlignment("middle");
 
       // ---- Texte de l'événement --------------------------------------------
-      // Pour les vacances : texte uniquement le 1er jour du mois (ou 1er jour absolu)
       var textParts = [];
 
-      // Vacances : affiche le titre seulement au 1er jour visible du mois
+      // Vacances : affiche le titre uniquement sur le premier jour non-week-end
+      // du mois (ou le premier jour non-week-end de la vacation dans ce mois).
       if (vacEvts.length > 0) {
-        var isFirstDayOfVac = isFirstDayOfRange_(dateObj, vacEvts[0], mo.month);
-        if (isFirstDayOfVac) {
+        if (isFirstWeekdayOfVacInMonth_(dateObj, vacEvts[0], mo.month)) {
           textParts.push(vacEvts[0].displayTitle);
         }
       }
@@ -338,6 +356,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   var legendRow = DATA_START + DAY_ROWS + 1;
   sheet.getRange(legendRow, 1).setValue("Légende").setFontWeight("bold").setFontSize(9);
   [
+    [COLOR_WEEKEND,      "Week-end"],
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
     [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
@@ -465,18 +484,29 @@ function mergeEventMaps_(maps) {
 }
 
 // ============================================================================
-// PREMIER JOUR VISIBLE D'UNE VACATION DANS UN MOIS DONNÉ
-// Retourne true si dateObj est le 1er jour de la vacation dans ce mois
-// (soit le 1er du mois si la vacation a démarré avant, soit le 1er jour de la vacation)
+// PREMIER JOUR NON-WEEK-END D'UNE VACATION DANS UN MOIS DONNÉ
+//
+// Retourne true si dateObj est le premier jour ouvré (lundi–vendredi) de
+// la vacation dans le mois courant. La vacation peut avoir démarré avant
+// le 1er du mois ; dans ce cas l'effectiveStart est le 1er du mois.
+// Si tous les jours restants de la vacation dans le mois sont des week-ends,
+// aucun titre ne sera affiché (edge-case extrêmement rare).
 // ============================================================================
-function isFirstDayOfRange_(dateObj, evt, currentMonth) {
-  var d = new Date(dateObj);
-  // Premier jour du mois courant
-  var firstOfMonth = new Date(d.getFullYear(), currentMonth, 1);
+function isFirstWeekdayOfVacInMonth_(dateObj, evt, currentMonth) {
+  var d = new Date(dateObj); d.setHours(0,0,0,0);
+
   // Début effectif de la vacation dans ce mois
-  var effectiveStart = evt.startDate > firstOfMonth ? evt.startDate : firstOfMonth;
+  var firstOfMonth = new Date(d.getFullYear(), currentMonth, 1);
+  var effectiveStart = (evt.startDate > firstOfMonth) ? new Date(evt.startDate) : new Date(firstOfMonth);
   effectiveStart.setHours(0,0,0,0);
-  d.setHours(0,0,0,0);
+
+  // Avance effectiveStart jusqu'au premier jour non-week-end
+  while (effectiveStart < evt.endDate) {
+    var dow = effectiveStart.getDay();
+    if (dow !== 0 && dow !== 6) break;          // lundi–vendredi trouvé
+    effectiveStart.setDate(effectiveStart.getDate() + 1);
+  }
+
   return d.getTime() === effectiveStart.getTime();
 }
 
@@ -564,17 +594,19 @@ function readConfig_(ss) {
   }
   var fetchGe = String(settings["FETCH_GE_VACANCES"] || "FALSE").toUpperCase() === "TRUE";
 
-  // Années scolaires (col G=6, H=7, I=8)
+  // Années scolaires (col G=6, H=7, I=8, J=9)
+  // Col J : valeur non-vide = marquer cette année pour génération
   var years = [];
   for (var r = 1; r < data.length; r++) {
-    var label = String(data[r][6] || "").trim();
-    var start = data[r][7];
-    var end   = data[r][8];
+    var label    = String(data[r][6] || "").trim();
+    var start    = data[r][7];
+    var end      = data[r][8];
+    var generate = String(data[r][9] || "").trim() !== "";  // col J non-vide
     if (!label || !start || !end) continue;
     var sd = (start instanceof Date) ? start : new Date(start);
     var ed = (end   instanceof Date) ? end   : new Date(end);
     if (isNaN(sd) || isNaN(ed)) continue;
-    years.push({ label: label, start: sd, end: ed });
+    years.push({ label: label, start: sd, end: ed, generate: generate });
   }
 
   return {
@@ -598,7 +630,7 @@ function setupConfigSheet() {
   var hCells = [
     [1,1,"Rôle calendrier"],[1,2,"Google Calendar ID"],
     [1,4,"Paramètre"],[1,5,"Valeur"],
-    [1,7,"Libellé année"],[1,8,"Début"],[1,9,"Fin"]
+    [1,7,"Libellé année"],[1,8,"Début"],[1,9,"Fin"],[1,10,"Générer"]
   ];
   hCells.forEach(function(h){
     sheet.getRange(h[0],h[1]).setValue(h[2])
@@ -615,14 +647,14 @@ function setupConfigSheet() {
   // Paramètres
   sheet.getRange(2,4,1,2).setValues([["FETCH_GE_VACANCES","TRUE"]]);
 
-  // Années scolaires
+  // Années scolaires — col J : mettre "X" sur la ligne à générer
   [
-    ["2025-26","2025-08-01","2026-08-31"],
-    ["2026-27","2026-08-01","2027-08-31"],
-  ].forEach(function(r,i){ sheet.getRange(i+2,7,1,3).setValues([r]); });
+    ["2025-26","2025-08-01","2026-08-31","X"],
+    ["2026-27","2026-08-01","2027-08-31",""],
+  ].forEach(function(r,i){ sheet.getRange(i+2,7,1,4).setValues([r]); });
 
-  // Largeurs de colonnes
-  [160,280,20,190,80,20,100,100,100].forEach(function(w,i){
+  // Largeurs de colonnes (ajout col J)
+  [160,280,20,190,80,20,100,100,100,80].forEach(function(w,i){
     sheet.setColumnWidth(i+1,w);
   });
 
@@ -636,7 +668,9 @@ function setupConfigSheet() {
     "1. Remplacez les IDs de calendrier par les vrais\n" +
     "   (Google Agenda → Paramètres → [calendrier] → ID du calendrier)\n" +
     "2. Ajustez les années scolaires (colonnes G–I)\n" +
-    "3. Utilisez Calendrier → Générer les onglets pour une année…"
+    "3. Mettez « X » (ou toute valeur) dans la colonne J (Générer)\n" +
+    "   de l'année souhaitée — exactement une ligne doit être marquée\n" +
+    "4. Utilisez Calendrier → Générer les onglets (année marquée dans Config)"
   );
 }
 
