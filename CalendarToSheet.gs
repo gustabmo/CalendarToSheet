@@ -31,8 +31,33 @@
 //   #jardindenfants / #primaire / #secondaire1 / #secondaire2  → filtre par niveau
 //   Pas de tag niveau   → apparaît sur tous les onglets
 //
-// Vacances GE : récupérées automatiquement depuis ge.ch
-// Couleurs (priorité décroissante) : bleu = week-end > orange foncé = vacances GE > orange clair = vacances école
+// ── RÈGLE DES COULEURS DE FOND (priorité décroissante) ───────────────────
+//   1. BLEU        (COLOR_WEEKEND)      — samedi et dimanche
+//   2. ORANGE FONCÉ (COLOR_GE_VACATION) — jours sans école dans le calendrier
+//                                         officiel DIP / Canton de Genève :
+//                                           • Périodes de vacances scolaires
+//                                             (automne, Noël, février, Pâques, été)
+//                                           • Jours fériés officiels GE chômés
+//                                             à l'école : Jeûne genevois, Fête du
+//                                             travail, Ascension, Lundi de Pentecôte,
+//                                             Restauration de la République (31 déc),
+//                                             Nouvel An, Vendredi-Saint, Lundi de
+//                                             Pâques, Fête nationale (1er août), Noël
+//                                           • Ponts accordés par le DIP
+//                                             (ex. Pont de l'Ascension = jeudi+vendredi)
+//                                         Source : https://www.ge.ch/vacances-scolaires-jours-feries
+//                                         Scraped chaque génération depuis les pages
+//                                         "vacances-scolaires-YYYY-YYYY" et
+//                                         "jours-feries-officiels-2023-2027"
+//   3. ORANGE CLAIR (COLOR_OWN_VACATION) — jours de congé supplémentaires propres
+//                                          à notre école (marqués #vacances dans
+//                                          le calendrier Google "parents" ou "public")
+//                                          Notre école est un SUPERSET du calendrier
+//                                          GE : tous les jours GE sont off + quelques
+//                                          jours additionnels propres à notre école.
+//
+// Les jours GE sont récupérés automatiquement si FETCH_GE_VACANCES = TRUE.
+// ── FIN RÈGLE COULEURS ───────────────────────────────────────────────────
 // ================================================
 
 // ============================================================================
@@ -140,7 +165,7 @@ function generateMarkedYear() {
 function generateAllViewsForYear_(ss, year, config) {
   var geVacations = [];
   if (config.fetchGe) {
-    geVacations = fetchGeVacations_(year.start.getFullYear(), year.end.getFullYear());
+    geVacations = fetchGeVacations_(year.start.getFullYear(), year.end.getFullYear(), year.start);
     Logger.log("Vacances GE récupérées : " + geVacations.length + " périodes");
   }
 
@@ -222,11 +247,11 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   var sheet = ss.getSheetByName(sheetName);
   if (sheet) {
     // Efface contenu, formats et fusions pour repartir à zéro
+    // (breakApart sur toute la plage pour dissoudre les cellules fusionnées
+    //  avant clearFormats, qui échouerait sur des plages fusionnées)
+    sheet.getDataRange().breakApart();
     sheet.clearContents();
     sheet.clearFormats();
-    // Supprime toutes les fusions existantes
-    var merges = sheet.getMergedRanges();
-    merges.forEach(function(r){ r.breakApart(); });
   } else {
     sheet = ss.insertSheet(sheetName);
   }
@@ -352,11 +377,11 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     .setBorder(true, true, true, true, true, true,
                "#CCCCCC", SpreadsheetApp.BorderStyle.SOLID_THIN);
 
-  // Légende
+  // Légende — week-end volontairement omis : le bleu est suffisamment intuitif
+  // et sa présence alourdirait la légende sans apporter d'information utile.
   var legendRow = DATA_START + DAY_ROWS + 1;
   sheet.getRange(legendRow, 1).setValue("Légende").setFontWeight("bold").setFontSize(9);
   [
-    [COLOR_WEEKEND,      "Week-end"],
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
     [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
@@ -520,10 +545,29 @@ function fontSizeForLength_(len) {
 }
 
 // ============================================================================
-// RÉCUPÈRE LES VACANCES SCOLAIRES GE
+// RÉCUPÈRE LES JOURS SANS ÉCOLE DU CANTON DE GENÈVE
+//
+// Combine deux sources depuis ge.ch :
+//   1. Pages "vacances-scolaires-YYYY-YYYY" — contiennent à la fois les
+//      périodes de vacances (format "du X au Y") ET des entrées mono-jour
+//      comme "Jeûne genevois le JJ mois YYYY", "Fête du travail le ...",
+//      "Pentecôte le ...", "Pont de l'Ascension les JJ et JJ mois YYYY".
+//   2. Page "jours-feries-officiels-2023-2027" — liste des jours fériés
+//      officiels (Nouvel An, Vendredi-Saint, Lundi de Pâques, Ascension,
+//      Pentecôte, Fête nationale, Jeûne genevois, Noël, Restauration de la
+//      République). Sert de filet de sécurité si la page vacances est
+//      incomplète.
+//
+// Retourne un tableau de {start: Date, end: Date} où end est exclusif
+// (convention : end = lendemain à minuit, même pour les mono-jour).
 // ============================================================================
-function fetchGeVacations_(startYear, endYear) {
+// yearStart : Date — début de l'année scolaire (ex. 2025-08-01).
+//             Utilisé pour construire la période des grandes vacances d'été
+//             d'ouverture. Hypothèse : yearStart = 01.08.YYYY (voir ci-dessous).
+function fetchGeVacations_(startYear, endYear, yearStart) {
   var vacations = [];
+
+  // ── 1. Pages annuelles vacances scolaires ──────────────────────────────
   for (var y = startYear; y < endYear; y++) {
     var slug = y + "-" + (y + 1);
     var url  = GE_VACATION_BASE + slug;
@@ -533,16 +577,80 @@ function fetchGeVacations_(startYear, endYear) {
         Logger.log("ge.ch HTTP " + resp.getResponseCode() + " pour " + url);
         continue;
       }
-      var parsed = parseGeVacationsHtml_(resp.getContentText());
-      Logger.log("  " + slug + " : " + parsed.length + " périodes");
+      var html   = resp.getContentText();
+      var parsed = parseGeVacationsHtml_(html);
+      Logger.log("  " + slug + " : " + parsed.length + " périodes/jours");
       vacations = vacations.concat(parsed);
+
+      // ── Grandes vacances d'été d'OUVERTURE ──────────────────────────────
+      // La page ge.ch indique la rentrée ("Rentrée scolaire le JJ mois YYYY")
+      // mais pas quand commencent les vacances d'été qui la précèdent.
+      // Hypothèse valide pour toutes nos années scolaires : le libellé de
+      // l'année commence le 01.08 → on pose que les grandes vacances d'été
+      // commencent à yearStart (01.08.YYYY) et se terminent la veille de la
+      // rentrée. Si cette hypothèse change un jour, réviser ici.
+      var rentree = parseRentreeScolaire_(html);
+      if (rentree) {
+        var summerStart = new Date(yearStart); summerStart.setHours(0,0,0,0);
+        var summerEnd   = new Date(rentree);   // minuit du jour de rentrée (exclu)
+        if (summerEnd > summerStart) {
+          Logger.log("  Grandes vacances d'été : " +
+            formatDateKey_(summerStart) + " → " + formatDateKey_(summerEnd) + " (exclu)");
+          vacations.push({start: summerStart, end: summerEnd});
+        }
+      } else {
+        Logger.log("  Rentrée scolaire introuvable pour " + slug +
+          " — grandes vacances d'été non générées");
+      }
     } catch(e) {
       Logger.log("Erreur ge.ch pour " + slug + " : " + e.message);
     }
   }
+
+  // ── 2. Page jours fériés officiels (filet de sécurité) ─────────────────
+  var urlFeries = "https://www.ge.ch/vacances-scolaires-jours-feries/jours-feries-officiels-2023-2027";
+  try {
+    var resp2 = UrlFetchApp.fetch(urlFeries, { muteHttpExceptions: true });
+    if (resp2.getResponseCode() === 200) {
+      var parsedFeries = parseGeFeriesHtml_(resp2.getContentText(), startYear, endYear);
+      Logger.log("  Jours fériés officiels : " + parsedFeries.length + " jours");
+      vacations = vacations.concat(parsedFeries);
+    }
+  } catch(e) {
+    Logger.log("Erreur ge.ch jours fériés : " + e.message);
+  }
+
+  // Déduplique par date de début (évite doublons entre les deux sources)
+  vacations = deduplicateDates_(vacations);
+  Logger.log("Total GE jours sans école (après dédup) : " + vacations.length);
   return vacations;
 }
 
+// ============================================================================
+// PARSE LA PAGE VACANCES SCOLAIRES ANNUELLE DE GE.CH
+//
+// Formats capturés (le texte HTML est d'abord aplati en texte brut) :
+//
+//   A) Période standard :
+//        "du [lundi] JJ [mois] [YYYY] au [vendredi] JJ mois YYYY"
+//        ex. "du lundi 20 octobre 2025 au vendredi 24 octobre 2025"
+//            "du lundi 22 décembre au vendredi 2 janvier 2026"   ← année début absente
+//
+//   B) Mono-jour :
+//        "le [jour] JJ mois YYYY"
+//        ex. "le jeudi 11 septembre 2025"  (Jeûne genevois, Fête du travail…)
+//        ex. "le lundi 25 mai 2026"        (Pentecôte)
+//
+//   C) Deux jours consécutifs (même mois) :
+//        "les [jour] JJ et [jour] JJ mois YYYY"
+//        ex. "les jeudi 14 et vendredi 15 mai 2026"  (Pont de l'Ascension)
+//
+// Note : les grandes vacances d'été ne sont PAS parsées ici (la page indique
+// seulement "dès le JJ mois" sans date de fin). Elles sont construites dans
+// fetchGeVacations_() via parseRentreeScolaire_() qui lit la date de rentrée.
+//
+// Note sur end exclusif : new Date(y, mo-1, d+1) est sûr même en fin de mois
+// ============================================================================
 function parseGeVacationsHtml_(html) {
   var MONTHS_FR = {
     "janvier":1,"février":2,"mars":3,"avril":4,"mai":5,"juin":6,
@@ -550,17 +658,114 @@ function parseGeVacationsHtml_(html) {
   };
   var text      = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
   var vacations = [];
-  var re = /du\s+(?:\w+\s+)?(\d{1,2})(?:er|ème)?\s+(\w+)\s+(\d{4})\s+au\s+(?:\w+\s+)?(\d{1,2})(?:er|ème)?\s+(\w+)\s+(\d{4})/gi;
   var m;
-  while ((m = re.exec(text)) !== null) {
+
+  // ── Format A : périodes "du ... au ..." ──────────────────────────────
+  // Groupes : 1=jour début, 2=mois début, 3=année début (optionnel),
+  //           4=jour fin, 5=mois fin, 6=année fin
+  var reRange = /du\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(\d{4}\s+)?au\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(\d{4})/gi;
+  while ((m = reRange.exec(text)) !== null) {
     var m1 = MONTHS_FR[m[2].toLowerCase()];
     var m2 = MONTHS_FR[m[5].toLowerCase()];
     if (!m1 || !m2) continue;
-    var start = new Date(parseInt(m[3]), m1-1, parseInt(m[1]));
-    var end   = new Date(parseInt(m[6]), m2-1, parseInt(m[4]) + 1);
-    if (!isNaN(start) && !isNaN(end) && end > start) vacations.push({start:start, end:end});
+    var y2 = parseInt(m[6]);
+    // Si l'année de début est absente, la déduire : si mois début > mois fin → année précédente
+    var y1 = m[3] ? parseInt(m[3]) : (m1 > m2 ? y2 - 1 : y2);
+    var start = new Date(y1, m1-1, parseInt(m[1]));
+    // new Date(y, mo, d+1) gère correctement le débordement de fin de mois
+    var end   = new Date(y2, m2-1, parseInt(m[4]) + 1);
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end > start)
+      vacations.push({start:start, end:end});
+  }
+
+  // ── Format B : mono-jour "le [jour] JJ mois YYYY" ────────────────────
+  var reSingle = /\ble\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(\d{4})/gi;
+  while ((m = reSingle.exec(text)) !== null) {
+    var mo = MONTHS_FR[m[2].toLowerCase()];
+    if (!mo) continue;
+    var y  = parseInt(m[3]);
+    var d  = parseInt(m[1]);
+    var start = new Date(y, mo-1, d);
+    var end   = new Date(y, mo-1, d + 1);
+    if (!isNaN(start.getTime())) vacations.push({start:start, end:end});
+  }
+
+  // ── Format C : deux jours "les [jour] JJ et [jour] JJ mois YYYY" ─────
+  var reTwo = /\bles\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+et\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(\d{4})/gi;
+  while ((m = reTwo.exec(text)) !== null) {
+    var mo = MONTHS_FR[m[3].toLowerCase()];
+    if (!mo) continue;
+    var y  = parseInt(m[4]);
+    var d1 = parseInt(m[1]), d2 = parseInt(m[2]);
+    var start = new Date(y, mo-1, d1);
+    var end   = new Date(y, mo-1, d2 + 1);
+    if (!isNaN(start.getTime()) && end > start) vacations.push({start:start, end:end});
+  }
+
+  return vacations;
+}
+
+// ============================================================================
+// EXTRAIT LA DATE DE RENTRÉE SCOLAIRE DEPUIS UNE PAGE VACANCES GE.CH
+// Cherche "Rentrée scolaire le [jour] JJ mois YYYY".
+// Retourne un objet Date à minuit (heure locale), ou null si non trouvé.
+// ============================================================================
+function parseRentreeScolaire_(html) {
+  var MONTHS_FR = {
+    "janvier":1,"février":2,"mars":3,"avril":4,"mai":5,"juin":6,
+    "juillet":7,"août":8,"septembre":9,"octobre":10,"novembre":11,"décembre":12
+  };
+  var text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  // "Rentrée scolaire le lundi 18 août 2025" ou "Rentrée scolaire le jeudi 20 août 2026"
+  var re = /rentr[ée]{1,2}e\s+scolaire\s+le\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(\d{4})/i;
+  var m  = re.exec(text);
+  if (!m) return null;
+  var mo = MONTHS_FR[m[2].toLowerCase()];
+  if (!mo) return null;
+  var d = new Date(parseInt(m[3]), mo-1, parseInt(m[1]));
+  d.setHours(0,0,0,0);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ============================================================================
+// PARSE LA PAGE JOURS FÉRIÉS OFFICIELS DE GE.CH (2023-2027)
+// Filtre uniquement les années entre startYear et endYear (exclusif).
+// Format attendu dans le texte : "NomFérié[jour] JJ mois YYYY"
+// ============================================================================
+function parseGeFeriesHtml_(html, startYear, endYear) {
+  var MONTHS_FR = {
+    "janvier":1,"février":2,"mars":3,"avril":4,"mai":5,"juin":6,
+    "juillet":7,"août":8,"septembre":9,"octobre":10,"novembre":11,"décembre":12
+  };
+  var text      = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  var vacations = [];
+
+  // Cherche toute date de la forme "JJ mois YYYY" dans la page
+  var re = /(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(20\d{2})/gi;
+  var m;
+  while ((m = re.exec(text)) !== null) {
+    var mo = MONTHS_FR[m[2].toLowerCase()];
+    if (!mo) continue;
+    var y = parseInt(m[3]);
+    if (y < startYear || y >= endYear) continue;  // hors de la plage demandée
+    var start = new Date(y, mo-1, parseInt(m[1]));
+    var end   = new Date(y, mo-1, parseInt(m[1]) + 1);
+    if (!isNaN(start)) vacations.push({start:start, end:end});
   }
   return vacations;
+}
+
+// ============================================================================
+// DÉDUPLIQUE UN TABLEAU DE {start, end} PAR DATE DE DÉBUT
+// Conserve la plage la plus longue pour chaque date de début identique.
+// ============================================================================
+function deduplicateDates_(ranges) {
+  var seen = {};
+  ranges.forEach(function(r) {
+    var key = r.start.getTime();
+    if (!seen[key] || r.end > seen[key].end) seen[key] = r;
+  });
+  return Object.keys(seen).map(function(k){ return seen[k]; });
 }
 
 // ============================================================================
@@ -603,9 +808,15 @@ function readConfig_(ss) {
     var end      = data[r][8];
     var generate = String(data[r][9] || "").trim() !== "";  // col J non-vide
     if (!label || !start || !end) continue;
-    var sd = (start instanceof Date) ? start : new Date(start);
-    var ed = (end   instanceof Date) ? end   : new Date(end);
-    if (isNaN(sd) || isNaN(ed)) continue;
+    // Convertit en Date locale (minuit heure locale) quelle que soit la source :
+    //   - Sheets renvoie un objet Date UTC-minuit quand la cellule est formatée
+    //     en date → getFullYear/Month/Date() en heure locale = correct.
+    //   - Sheets renvoie une chaîne "YYYY-MM-DD" quand la cellule est du texte
+    //     → new Date("YYYY-MM-DD") = UTC minuit → en Zurich (UTC+2) getDate()
+    //     donne le jour PRÉCÉDENT. On parse donc manuellement via split("-").
+    var sd = parseDateLocal_(start);
+    var ed = parseDateLocal_(end);
+    if (!sd || !ed) continue;
     years.push({ label: label, start: sd, end: ed, generate: generate });
   }
 
@@ -681,7 +892,7 @@ function protectSheet_(sheet) {
   sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET)
     .forEach(function(p){ p.remove(); });
   sheet.protect()
-    .setDescription("Géré par le script — utiliser 📅 Calendrier pour mettre à jour.")
+    .setDescription("Géré par le script — utiliser Calendrier pour mettre à jour.")
     .setWarningOnly(true);
 }
 
@@ -705,6 +916,37 @@ function formatDateKey_(date) {
   return date.getFullYear() + "-"
     + String(date.getMonth()+1).padStart(2,"0") + "-"
     + String(date.getDate()).padStart(2,"0");
+}
+
+// ============================================================================
+// PARSE UNE DATE EN HEURE LOCALE (minuit), quelle que soit la source Sheets.
+//
+// Problème : new Date("2025-08-01") est interprété comme UTC minuit.
+// En Zurich (UTC+2), getDate() retourne 31 (juillet !). Pour éviter ce
+// décalage, on parse les chaînes "YYYY-MM-DD" manuellement avec split("-"),
+// ce qui construit new Date(y, m-1, d) = minuit heure locale garanti.
+// Les objets Date natifs (retournés par Sheets pour les cellules date) sont
+// déjà en heure locale : on extrait y/m/d avec les getters locaux.
+// Retourne null si la valeur est invalide.
+// ============================================================================
+function parseDateLocal_(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    // Date native Sheets : getters locaux = correct
+    var d = new Date(val.getFullYear(), val.getMonth(), val.getDate());
+    return isNaN(d.getTime()) ? null : d;
+  }
+  var s = String(val).trim();
+  // Format "YYYY-MM-DD" ou "YYYY/MM/DD"
+  var parts = s.split(/[-\/]/);
+  if (parts.length === 3) {
+    var y = parseInt(parts[0]), mo = parseInt(parts[1]), day = parseInt(parts[2]);
+    if (!isNaN(y) && !isNaN(mo) && !isNaN(day)) {
+      var d = new Date(y, mo - 1, day);
+      return isNaN(d.getTime()) ? null : d;
+    }
+  }
+  return null;
 }
 
 function isInRanges_(dateObj, ranges) {
