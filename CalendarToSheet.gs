@@ -6,7 +6,7 @@
 // Menu : 📅 Calendrier
 //
 // Onglets générés (script-managed, ne pas modifier manuellement) :
-//   "[année] Général"           — calendrier public
+//   "[année] Public"            — calendrier public
 //   "[année] Parents"           — événements non tagués (tous niveaux)
 //   "[année] Parents JE"        — parents + événements #jardindenfants
 //   "[année] Parents Prim"      — parents + événements #primaire
@@ -145,8 +145,8 @@ function generateAllViewsForYear_(ss, year, config) {
 
   var label = year.label;
 
-  // ── 1. Général (public uniquement, tous événements) ──────────────────────
-  generateSheet_(ss, label + " Général", year, geVacations,
+  // ── 1. Public (public uniquement, tous événements) ──────────────────────
+  generateSheet_(ss, label + " Public", year, geVacations,
     mergeEventMaps_([calPublic]),
     { mode: "général" });
 
@@ -186,6 +186,8 @@ function generateAllViewsForYear_(ss, year, config) {
 // Retourne : false = invisible | true = visible
 // ============================================================================
 function isEventVisible_(evt, viewCfg) {
+  if (evt.horsAnnuel) return false;
+
   var hasLevelTag = evt.levels.length > 0;
 
   switch (viewCfg.mode) {
@@ -422,9 +424,13 @@ function collectCalendarEvents_(calId, startDate, endDate) {
 // Extrait : #vacances, #compact:..., #jardindenfants, #primaire, #secondaire1, #secondaire2
 // ============================================================================
 function parseDescription_(desc, rawTitle) {
+  var horsAnnuel   = false;
   var isVacance    = false;
   var levels       = [];
   var compactTitle = null;
+
+  // #horsAnnuel
+  if (/#horsAnnuel\b/i.test(desc)) horsAnnuel = true;
 
   // #vacances
   if (/#vacances\b/i.test(desc)) isVacance = true;
@@ -441,7 +447,7 @@ function parseDescription_(desc, rawTitle) {
   // Titre affiché = compact si dispo, sinon titre brut
   var displayTitle = compactTitle || rawTitle;
 
-  return { isVacance: isVacance, levels: levels, displayTitle: displayTitle };
+  return { horsAnnuel: horsAnnuel, isVacance: isVacance, levels: levels, displayTitle: displayTitle };
 }
 
 // ============================================================================
