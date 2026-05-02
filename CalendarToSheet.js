@@ -736,6 +736,30 @@ function fetchGeVacations_(startYear, endYear, yearStart) {
   return vacations;
 }
 
+
+function normalizeFrenchText_(html) {
+  var text = html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&[a-z]+;/gi, function(entity) {
+      var map = {
+        "&eacute;":"é","&egrave;":"è","&ecirc;":"ê","&euml;":"ë",
+        "&agrave;":"à","&acirc;":"â",
+        "&ucirc;":"û","&uuml;":"ü",
+        "&ocirc;":"ô",
+        "&icirc;":"î",
+        "&ccedil;":"ç"
+      };
+      return map[entity.toLowerCase()] || "";
+    })
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+  // remove accents → stable matching
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+
 // ============================================================================
 // PARSE LA PAGE VACANCES SCOLAIRES ANNUELLE DE GE.CH
 //
@@ -763,10 +787,10 @@ function fetchGeVacations_(startYear, endYear, yearStart) {
 // ============================================================================
 function parseGeVacationsHtml_(html) {
   var MONTHS_FR = {
-    "janvier":1,"février":2,"mars":3,"avril":4,"mai":5,"juin":6,
-    "juillet":7,"août":8,"septembre":9,"octobre":10,"novembre":11,"décembre":12
+    "janvier":1,"fevrier":2,"mars":3,"avril":4,"mai":5,"juin":6,
+    "juillet":7,"aout":8,"septembre":9,"octobre":10,"novembre":11,"decembre":12
   };
-  var text      = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  var text = normalizeFrenchText_(html);
   var vacations = [];
   var m;
 
@@ -822,10 +846,10 @@ function parseGeVacationsHtml_(html) {
 // ============================================================================
 function parseRentreeScolaire_(html) {
   var MONTHS_FR = {
-    "janvier":1,"février":2,"mars":3,"avril":4,"mai":5,"juin":6,
-    "juillet":7,"août":8,"septembre":9,"octobre":10,"novembre":11,"décembre":12
+    "janvier":1,"fevrier":2,"mars":3,"avril":4,"mai":5,"juin":6,
+    "juillet":7,"aout":8,"septembre":9,"octobre":10,"novembre":11,"decembre":12
   };
-  var text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  var text = normalizeFrenchText_(html);
   // "Rentrée scolaire le lundi 18 août 2025" ou "Rentrée scolaire le jeudi 20 août 2026"
   var re = /rentr[ée]{1,2}e\s+scolaire\s+le\s+(?:\w+\s+)?(\d{1,2})(?:er|ème|e)?\s+(\w+)\s+(\d{4})/i;
   var m  = re.exec(text);
@@ -844,10 +868,10 @@ function parseRentreeScolaire_(html) {
 // ============================================================================
 function parseGeFeriesHtml_(html, startYear, endYear) {
   var MONTHS_FR = {
-    "janvier":1,"février":2,"mars":3,"avril":4,"mai":5,"juin":6,
-    "juillet":7,"août":8,"septembre":9,"octobre":10,"novembre":11,"décembre":12
+    "janvier":1,"fevrier":2,"mars":3,"avril":4,"mai":5,"juin":6,
+    "juillet":7,"aout":8,"septembre":9,"octobre":10,"novembre":11,"decembre":12
   };
-  var text      = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  var text = normalizeFrenchText_(html);
   var vacations = [];
 
   // Cherche toute date de la forme "JJ mois YYYY" dans la page
