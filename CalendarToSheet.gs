@@ -3,7 +3,7 @@
 // =============================================================================
 // CALENDRIER SCOLAIRE — Google Apps Script  v3
 // À attacher à un fichier Google Sheets.
-// Menu : 📅 Calendrier
+// Menu : Calendrier
 //
 // Onglets générés (script-managed, ne pas modifier manuellement) :
 //   "[année] Public"            — calendrier public
@@ -89,7 +89,7 @@ var GE_VACATION_BASE = "https://www.ge.ch/vacances-scolaires-jours-feries/vacanc
 // ============================================================================
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu("📅 Calendrier")
+    .createMenu("Calendrier")
     .addItem("Générer les onglets pour une année…", "promptGenerateYear")
     .addSeparator()
     .addItem("Initialiser l'onglet Config",         "setupConfigSheet")
@@ -339,12 +339,11 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   sheet.getRange(legendRow, 1).setValue("Légende").setFontWeight("bold").setFontSize(9);
   [
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
-    [COLOR_OWN_VACATION, "Vacances propres à l'école"],
-    [COLOR_WEEKEND,      "Week-end"],
+    [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
     var lr = legendRow + 1 + i;
     sheet.getRange(lr, 1, 1, 2).setBackground(item[0]);
-    sheet.getRange(lr, 2).setValue(item[1]).setFontSize(8);
+    sheet.getRange(lr, 1).setValue(item[1]).setFontSize(7);
     sheet.setRowHeight(lr, 16);
   });
 
@@ -407,6 +406,7 @@ function collectCalendarEvents_(calId, startDate, endDate) {
       if (!result[key]) result[key] = [];
       result[key].push({
         displayTitle : parsed.displayTitle,
+        horsAnnuel   : parsed.horsAnnuel,
         isVacance    : parsed.isVacance,
         levels       : parsed.levels,
         startDate    : evtStartDate,
@@ -539,7 +539,7 @@ function parseGeVacationsHtml_(html) {
 function readConfig_(ss) {
   var cfgSheet = ss.getSheetByName("Config");
   if (!cfgSheet) {
-    SpreadsheetApp.getUi().alert('Onglet "Config" introuvable.\nUtilisez 📅 Calendrier → Initialiser l\'onglet Config.');
+    SpreadsheetApp.getUi().alert('Onglet "Config" introuvable.\nUtilisez Calendrier → Initialiser l\'onglet Config.');
     return null;
   }
   var data = cfgSheet.getDataRange().getValues();
@@ -636,7 +636,7 @@ function setupConfigSheet() {
     "1. Remplacez les IDs de calendrier par les vrais\n" +
     "   (Google Agenda → Paramètres → [calendrier] → ID du calendrier)\n" +
     "2. Ajustez les années scolaires (colonnes G–I)\n" +
-    "3. Utilisez 📅 Calendrier → Générer les onglets pour une année…"
+    "3. Utilisez Calendrier → Générer les onglets pour une année…"
   );
 }
 
