@@ -202,7 +202,6 @@ function generateAllViewsForYear_(ss, year, config) {
       { mode: "profs-niveau", level: levelKey });
   });
 
-  SpreadsheetApp.getUi().alert("Onglets générés pour l'année " + label + " ✓");
 }
 
 // ============================================================================
@@ -440,20 +439,37 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     .setBorder(true, true, true, true, true, true,
                "#CCCCCC", SpreadsheetApp.BorderStyle.SOLID_THIN);
 
-  // ── Légende ───────────────────────────────────────────────────────────────
+  // ── Légende (une seule ligne) ─────────────────────────────────────────────
   // Légende — week-end volontairement omis : le bleu est suffisamment intuitif
   // et sa présence alourdirait la légende sans apporter d'information utile.
   var legendRow = DATA_START + DAY_ROWS + 1;
-  sheet.getRange(legendRow, 1).setValue("Légende").setFontWeight("bold").setFontSize(9);
+  sheet.setRowHeight(legendRow, 16);
+
+  // "Légende" label
+  sheet.getRange(legendRow, 1)
+    .setValue("Légende").setFontWeight("bold").setFontSize(9);
+
+  // Colored badge + label for each vacation type, side by side starting col 2
   [
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
     [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
-    var lr = legendRow + 1 + i;
-    sheet.getRange(lr, 1, 1, 2).setBackground(item[0]);
-    sheet.getRange(lr, 1).setValue(item[1]).setFontSize(7);
-    sheet.setRowHeight(lr, 16);
+    var col = 2 + i * 2;   // cols 2,4 for badges; 3,5 for text
+    sheet.getRange(legendRow, col, 1, 2).setBackground(item[0]);
+    sheet.getRange(legendRow, col).setValue(item[1]).setFontSize(7);
   });
+
+  // "Dernière mise à jour" — timestamp of this tab's generation
+  var now       = new Date();
+  var pad       = function(n){ return String(n).padStart(2, "0"); };
+  var timestamp = now.getFullYear() + "-" + pad(now.getMonth()+1) + "-" + pad(now.getDate()) +
+                  " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
+  // Place it after the two badges (col 6) — leaves space regardless of NUM_MONTHS
+  var tsCol = Math.max(6, NUM_COLS - 3);
+  sheet.getRange(legendRow, tsCol, 1, NUM_COLS - tsCol + 1).merge()
+    .setValue("Dernière mise à jour : " + timestamp)
+    .setFontSize(8).setFontStyle("italic").setFontColor("#888888")
+    .setHorizontalAlignment("right").setVerticalAlignment("middle");
 
   sheet.setFrozenRows(2);
   protectSheet_(sheet);
@@ -631,14 +647,37 @@ function fontSizeForLength_(len) {
 function fetchGeVacations_(startYear, endYear, yearStart) {
   var vacations = [];
 
-  // ── 1. Pages annuelles vacances scolaires ──────────────────────────────
+  // ── Construit la liste de toutes les URLs à récupérer en parallèle ──────
+  // Ordre : pages annuelles d'abord (indices 0..N-1), puis jours fériés (index N).
+  var slugs    = [];   // slug correspondant à chaque page annuelle
+  var requests = [];   // tableau passé à fetchAll
+
   for (var y = startYear; y < endYear; y++) {
     var slug = y + "-" + (y + 1);
-    var url  = GE_VACATION_BASE + slug;
+    slugs.push(slug);
+    requests.push({ url: GE_VACATION_BASE + slug, muteHttpExceptions: true });
+  }
+
+  var urlFeries   = "https://www.ge.ch/vacances-scolaires-jours-feries/jours-feries-officiels-2023-2027";
+  var feriesIndex = requests.length;   // index de la page jours fériés dans responses
+  requests.push({ url: urlFeries, muteHttpExceptions: true });
+
+  // ── Requêtes parallèles ──────────────────────────────────────────────────
+  var responses;
+  try {
+    responses = UrlFetchApp.fetchAll(requests);
+  } catch(e) {
+    Logger.log("fetchAll ge.ch échoué : " + e.message);
+    return vacations;
+  }
+
+  // ── 1. Pages annuelles vacances scolaires ──────────────────────────────
+  for (var i = 0; i < slugs.length; i++) {
+    var slug = slugs[i];
     try {
-      var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      var resp = responses[i];
       if (resp.getResponseCode() !== 200) {
-        Logger.log("ge.ch HTTP " + resp.getResponseCode() + " pour " + url);
+        Logger.log("ge.ch HTTP " + resp.getResponseCode() + " pour " + slug);
         continue;
       }
       var html   = resp.getContentText();
@@ -672,9 +711,8 @@ function fetchGeVacations_(startYear, endYear, yearStart) {
   }
 
   // ── 2. Page jours fériés officiels (filet de sécurité) ─────────────────
-  var urlFeries = "https://www.ge.ch/vacances-scolaires-jours-feries/jours-feries-officiels-2023-2027";
   try {
-    var resp2 = UrlFetchApp.fetch(urlFeries, { muteHttpExceptions: true });
+    var resp2 = responses[feriesIndex];
     if (resp2.getResponseCode() === 200) {
       var parsedFeries = parseGeFeriesHtml_(resp2.getContentText(), startYear, endYear);
       Logger.log("  Jours fériés officiels : " + parsedFeries.length + " jours");
