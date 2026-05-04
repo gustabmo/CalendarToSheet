@@ -277,6 +277,14 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // Total rows in our managed area: title(1) + header(1) + data(31)
   var TOTAL_ROWS = 1 + 1 + DAY_ROWS;
 
+  // ── Redimensionne la feuille si nécessaire ───────────────────────────────
+  var currentCols = sheet.getMaxColumns();
+  if (currentCols < NUM_COLS) {
+    sheet.insertColumnsAfter(currentCols, NUM_COLS - currentCols);
+  } else if (currentCols > NUM_COLS) {
+    sheet.deleteColumns(NUM_COLS + 1, currentCols - NUM_COLS);
+  }
+
   // ── Hauteurs de lignes (peu d'appels, pas de gain à batcher) ────────────
   sheet.setRowHeight(TITLE_ROW,  28);
   sheet.setRowHeight(HEADER_ROW, 20);
