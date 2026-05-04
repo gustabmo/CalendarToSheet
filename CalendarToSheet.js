@@ -267,7 +267,9 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
   var months     = buildMonthList_(year.start, year.end);
   var NUM_MONTHS = months.length;
-  var NUM_COLS   = NUM_MONTHS * 2;
+  var EVT_COLS       = 6;
+  var COLS_PER_MONTH = 1 + EVT_COLS;
+  var NUM_COLS       = NUM_MONTHS * COLS_PER_MONTH;
   var DAY_ROWS   = 31;
   var TITLE_ROW  = 1;   // 1-indexed for Sheets API
   var HEADER_ROW = 2;
@@ -283,9 +285,12 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   }
 
   // ── Largeurs de colonnes ─────────────────────────────────────────────────
+  var evtColWidths = [15, 15, 15, 15, 14, 14]; // 6 cols summing to 88px
   for (var m = 0; m < NUM_MONTHS; m++) {
-    sheet.setColumnWidth(m * 2 + 1, 26);
-    sheet.setColumnWidth(m * 2 + 2, 88);
+    sheet.setColumnWidth(m * COLS_PER_MONTH + 1, 26);
+    for (var ec = 0; ec < EVT_COLS; ec++) {
+      sheet.setColumnWidth(m * COLS_PER_MONTH + 2 + ec, evtColWidths[ec]);
+    }
   }
 
   // ── Initialise les tableaux 2D (indexés [rowIndex][colIndex], 0-based) ──
@@ -335,8 +340,8 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // ── Calcul des cellules par mois ─────────────────────────────────────────
   for (var m = 0; m < NUM_MONTHS; m++) {
     var mo      = months[m];
-    var colDay  = m * 2;        // 0-based column index for the day number
-    var colEvt  = colDay + 1;   // 0-based column index for the event text
+    var colDay  = m * COLS_PER_MONTH;   // 0-based column index for the day number
+    var colEvt  = colDay + 1;           // 0-based column index for the first event column
 
     // En-tête de mois (HEADER_ROW, sera fusionné après le batch)
     values[HEADER_RI][colDay]      = mo.label;
@@ -355,7 +360,9 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       if (d > daysInMonth) {
         // Jour inexistant (ex. 31 dans un mois de 30 jours)
         backgrounds[ri][colDay] = COLOR_NODAY_BG;
-        backgrounds[ri][colEvt] = COLOR_NODAY_BG;
+        for (var ec = 0; ec < EVT_COLS; ec++) {
+          backgrounds[ri][colEvt + ec] = COLOR_NODAY_BG;
+        }
         continue;
       }
 
@@ -382,7 +389,9 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
       if (bg) {
         backgrounds[ri][colDay] = bg;
-        backgrounds[ri][colEvt] = bg;
+        for (var ec = 0; ec < EVT_COLS; ec++) {
+          backgrounds[ri][colEvt + ec] = bg;
+        }
       }
 
       // ---- Numéro du jour --------------------------------------------------
@@ -434,7 +443,9 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // ── Fusions (doit se faire après setValues) ──────────────────────────────
   sheet.getRange(TITLE_ROW, 1, 1, NUM_COLS).merge();
   for (var m = 0; m < NUM_MONTHS; m++) {
-    sheet.getRange(HEADER_ROW, m * 2 + 1, 1, 2).merge();
+    sheet.getRange(HEADER_ROW, m * COLS_PER_MONTH + 1, 1, COLS_PER_MONTH).merge();
+    // mergeAcross fusionne chaque ligne indépendamment → 1 appel API pour 31 lignes
+    sheet.getRange(DATA_START, m * COLS_PER_MONTH + 2, DAY_ROWS, EVT_COLS).mergeAcross();
   }
 
   // ── Bordures (une seule plage) ────────────────────────────────────────────
