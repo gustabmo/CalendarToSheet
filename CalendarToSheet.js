@@ -320,7 +320,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     // Efface contenu, formats et fusions pour repartir à zéro
     // (breakApart sur toute la plage pour dissoudre les cellules fusionnées
     //  avant clearFormats, qui échouerait sur des plages fusionnées)
-    sheet.getDataRange().breakApart();
+    sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
     sheet.clearContents();
     sheet.clearFormats();
   } else {
@@ -410,7 +410,8 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // ── Prétraitement des événements multiday ────────────────────────────────
   var multidayEvts     = collectMultidayEvents_(events, viewCfg);
   var multidayColorMap = buildMultidayColorMap_(multidayEvts);
-  var monthTrackCounts = [];  // [m][d0] = nb de pistes actives (d0 : 0-based day index)
+  var monthTrackCounts        = [];  // [m][d0] = nb de pistes actives
+  var monthDayLastTrackExpand = [];  // [m][d0] = nb colonnes empruntées par la dernière piste si elle démarre
 
   // ── Calcul des cellules par mois ─────────────────────────────────────────
   for (var m = 0; m < NUM_MONTHS; m++) {
@@ -421,7 +422,8 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     var monthStart     = new Date(mo.year, mo.month, 1);
     var nextMonthStart = new Date(mo.year, mo.month + 1, 1);
     var monthTracks    = assignTracksForMonth_(multidayEvts, monthStart, nextMonthStart);
-    monthTrackCounts[m]= new Array(DAY_ROWS).fill(0);
+    monthTrackCounts[m]        = new Array(DAY_ROWS).fill(0);
+    monthDayLastTrackExpand[m] = new Array(DAY_ROWS).fill(0);
 
     // En-tête de mois (HEADER_ROW, sera fusionné après le batch)
     values[HEADER_RI][colDay]      = mo.label;
@@ -494,6 +496,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       });
       monthTrackCounts[m][d - 1] = maxActiveTrack;
 
+      // ---- Pistes multiday : couleur + texte (le texte reste dans la cellule colorée)
       for (var t = 1; t <= maxActiveTrack; t++) {
         var tColIdx = colEvt + t - 1;
         var tEvt    = activeTracks[t];
@@ -510,24 +513,40 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
         // gap track : le fond par défaut déjà posé reste intact
       }
 
-      // ---- Zone restante : événements mono-jour -------------------------------
-      var colRemaining = colEvt + maxActiveTrack;
-      var textParts    = [];
+      // ---- Zone restante : événements mono-jour, + extension de la dernière piste si elle démarre
+      var remaining  = EVT_COLS - maxActiveTrack;
+      var remColBase = colEvt + maxActiveTrack;   // 0-based col index of first remaining column
 
-      if (vacEvts.length > 0) {
-        if (isFirstWeekdayOfVacInMonth_(dateObj, vacEvts[0], mo.month)) {
-          textParts.push(vacEvts[0].displayTitle);
-        }
+      var lastEvt        = maxActiveTrack > 0 ? activeTracks[maxActiveTrack] : null;
+      var lastIsStarting = lastEvt != null && isFirstWeekdayOfVacInMonth_(dateObj, lastEvt, mo.month);
+
+      var textParts = [];
+      if (vacEvts.length > 0 && isFirstWeekdayOfVacInMonth_(dateObj, vacEvts[0], mo.month)) {
+        textParts.push(vacEvts[0].displayTitle);
       }
       normalEvts.forEach(function(e){ textParts.push(e.displayTitle); });
+      var hasText = textParts.length > 0;
 
-      if (textParts.length > 0) {
+      // La dernière piste emprunte une fraction de la zone restante pour élargir sa cellule
+      var lastTrackExpand = 0;
+      if (lastIsStarting && remaining > 0) {
+        var numCompeting = 1 + (hasText ? 1 : 0);
+        lastTrackExpand  = Math.floor(remaining / numCompeting);
+        var expandColor  = multidayColorMap[getEventKey_(lastEvt)];
+        for (var bc = 0; bc < lastTrackExpand; bc++) {
+          backgrounds[ri][remColBase + bc] = expandColor;
+        }
+      }
+      monthDayLastTrackExpand[m][d - 1] = lastTrackExpand;
+
+      if (hasText) {
+        var normalColStart = remColBase + lastTrackExpand;
         var text = textParts.join(" / ");
-        values[ri][colRemaining]    = text;
-        fontSizes[ri][colRemaining] = fontSizeForLength_(text.length);
-        wraps[ri][colRemaining]     = true;
-        hAligns[ri][colRemaining]   = "left";
-        vAligns[ri][colRemaining]   = "middle";
+        values[ri][normalColStart]      = text;
+        fontSizes[ri][normalColStart]   = fontSizeForLength_(text.length);
+        wraps[ri][normalColStart]       = true;
+        hAligns[ri][normalColStart]     = "left";
+        vAligns[ri][normalColStart]     = "middle";
       }
     }
   }
@@ -555,19 +574,38 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   sheet.getRange(TITLE_ROW, 1, 1, NUM_COLS).merge();
   for (var m = 0; m < NUM_MONTHS; m++) {
     sheet.getRange(HEADER_ROW, m * COLS_PER_MONTH + 1, 1, COLS_PER_MONTH).merge();
-    // Regroupe les lignes consécutives avec le même nombre de pistes pour
-    // minimiser les appels API (mergeAcross par plage homogène).
     var d = 0;
     while (d < DAY_ROWS) {
-      var maxTrack  = monthTrackCounts[m][d] || 0;
+      var maxTrack = monthTrackCounts[m][d] || 0;
       var remaining = EVT_COLS - maxTrack;
-      var runEnd    = d + 1;
-      while (runEnd < DAY_ROWS && (monthTrackCounts[m][runEnd] || 0) === maxTrack) runEnd++;
-      if (remaining >= 2) {
-        sheet.getRange(DATA_START + d, m * COLS_PER_MONTH + maxTrack + 2, runEnd - d, remaining)
-             .mergeAcross();
+      var expand   = monthDayLastTrackExpand[m][d] || 0;
+
+      if (expand > 0) {
+        // La dernière piste fusionne avec les colonnes empruntées (1 seule ligne)
+        // 1-based col of last track cell: m*COLS_PER_MONTH + maxTrack + 1
+        var trackCol1  = m * COLS_PER_MONTH + maxTrack + 1;
+        var mergedCols = 1 + expand;
+        sheet.getRange(DATA_START + d, trackCol1, 1, mergedCols).merge();
+        // Zone restante après l'emprunt → événements normaux
+        var normalCols = remaining - expand;
+        if (normalCols >= 2) {
+          sheet.getRange(DATA_START + d, trackCol1 + mergedCols, 1, normalCols).merge();
+        }
+        d++;
+      } else {
+        // Regroupe les lignes consécutives avec le même maxTrack et pas d'extension
+        var runEnd = d + 1;
+        while (runEnd < DAY_ROWS &&
+               (monthTrackCounts[m][runEnd] || 0) === maxTrack &&
+               (monthDayLastTrackExpand[m][runEnd] || 0) === 0) {
+          runEnd++;
+        }
+        if (remaining >= 2) {
+          sheet.getRange(DATA_START + d, m * COLS_PER_MONTH + maxTrack + 2, runEnd - d, remaining)
+               .mergeAcross();
+        }
+        d = runEnd;
       }
-      d = runEnd;
     }
   }
 
