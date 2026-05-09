@@ -128,8 +128,8 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Calendrier")
     .addItem("Générer les onglets (année marquée dans Config)", "generateMarkedYear")
-    .addSeparator()
-    .addItem("Initialiser l'onglet Config", "setupConfigSheet")
+    // .addSeparator()
+    // .addItem("Initialiser l'onglet Config", "setupConfigSheet")
     .addToUi();
 }
 
