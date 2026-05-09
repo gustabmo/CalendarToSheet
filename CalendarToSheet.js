@@ -94,6 +94,16 @@ var COLOR_HEADER_BG      = "#434343";  // fond en-têtes de mois
 var COLOR_HEADER_FG      = "#FFFFFF";  // texte en-têtes de mois
 var COLOR_NODAY_BG       = "#EFEFEF";  // jours inexistants (ex. 31 février)
 
+// ---- Couleurs des pistes multiday (6 teintes de vert) ----------------------
+var TRACK_COLORS = [
+  "#2E7D32",  // 1 vert foncé
+  "#66BB6A",  // 2 vert moyen
+  "#26A69A",  // 3 vert-sarcelle
+  "#AED581",  // 4 vert-jaune
+  "#80DEEA",  // 5 cyan clair
+  "#C8E6C9"   // 6 vert très clair
+];
+
 // ---- Seuils de taille de police (en nombre de caractères du texte affiché) -
 var FONT_SIZE_NORMAL     = 7;
 var FONT_SIZE_MEDIUM     = 6;
@@ -251,6 +261,58 @@ function isEventVisible_(evt, viewCfg) {
 // setFontColors, setWraps). Cela réduit les appels API de plusieurs milliers
 // à une dizaine, ce qui est le principal levier de performance sur Apps Script.
 // ============================================================================
+// UTILITAIRES ÉVÉNEMENTS MULTIDAY
+// ============================================================================
+function getEventKey_(evt) {
+  return evt.startDate.getTime() + '|' + evt.endDate.getTime() + '|' + evt.displayTitle;
+}
+
+function collectMultidayEvents_(eventsMap, viewCfg) {
+  var seen = {};
+  var result = [];
+  Object.keys(eventsMap).forEach(function(dateKey) {
+    eventsMap[dateKey].forEach(function(evt) {
+      if (!evt.isMultiday || evt.isVacance) return;
+      if (!isEventVisible_(evt, viewCfg)) return;
+      var key = getEventKey_(evt);
+      if (!seen[key]) { seen[key] = true; result.push(evt); }
+    });
+  });
+  result.sort(function(a, b) { return a.startDate - b.startDate; });
+  return result;
+}
+
+function buildMultidayColorMap_(multidayEvts) {
+  var map = {};
+  multidayEvts.forEach(function(evt, i) {
+    map[getEventKey_(evt)] = TRACK_COLORS[i % TRACK_COLORS.length];
+  });
+  return map;
+}
+
+// Affecte une piste (1-indexed) à chaque événement multiday actif dans le mois.
+// Tri par date de début globale → les événements démarrés plus tôt occupent
+// les pistes les plus à gauche ; les pistes se réaffectent à chaque nouveau mois.
+function assignTracksForMonth_(multidayEvts, monthStart, nextMonthStart) {
+  var active = multidayEvts.filter(function(evt) {
+    return evt.startDate < nextMonthStart && evt.endDate > monthStart;
+  });
+  var trackEnds   = [];   // trackEnds[t] = fin de l'événement occupant la piste t
+  var assignments = {};
+  active.forEach(function(evt) {
+    var effStart = evt.startDate > monthStart ? evt.startDate : monthStart;
+    var effEnd   = evt.endDate   < nextMonthStart ? evt.endDate : nextMonthStart;
+    var assigned = -1;
+    for (var t = 0; t < trackEnds.length; t++) {
+      if (trackEnds[t] <= effStart) { trackEnds[t] = effEnd; assigned = t + 1; break; }
+    }
+    if (assigned === -1) { trackEnds.push(effEnd); assigned = trackEnds.length; }
+    assignments[getEventKey_(evt)] = assigned;
+  });
+  return assignments;
+}
+
+// ============================================================================
 function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // ── Récupère ou crée l'onglet sans le supprimer ──────────────────────────
   var sheet = ss.getSheetByName(sheetName);
@@ -345,11 +407,21 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   vAligns[TITLE_RI][0]     = "middle";
   backgrounds[TITLE_RI][0] = "#FFFFFF";
 
+  // ── Prétraitement des événements multiday ────────────────────────────────
+  var multidayEvts     = collectMultidayEvents_(events, viewCfg);
+  var multidayColorMap = buildMultidayColorMap_(multidayEvts);
+  var monthTrackCounts = [];  // [m][d0] = nb de pistes actives (d0 : 0-based day index)
+
   // ── Calcul des cellules par mois ─────────────────────────────────────────
   for (var m = 0; m < NUM_MONTHS; m++) {
     var mo      = months[m];
     var colDay  = m * COLS_PER_MONTH;   // 0-based column index for the day number
     var colEvt  = colDay + 1;           // 0-based column index for the first event column
+
+    var monthStart     = new Date(mo.year, mo.month, 1);
+    var nextMonthStart = new Date(mo.year, mo.month + 1, 1);
+    var monthTracks    = assignTracksForMonth_(multidayEvts, monthStart, nextMonthStart);
+    monthTrackCounts[m]= new Array(DAY_ROWS).fill(0);
 
     // En-tête de mois (HEADER_ROW, sera fusionné après le batch)
     values[HEADER_RI][colDay]      = mo.label;
@@ -385,8 +457,9 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
         return isEventVisible_(e, viewCfg);
       });
 
-      var vacEvts    = dayEvts.filter(function(e){ return  e.isVacance; });
-      var normalEvts = dayEvts.filter(function(e){ return !e.isVacance; });
+      var vacEvts         = dayEvts.filter(function(e){ return  e.isVacance; });
+      var normalEvts      = dayEvts.filter(function(e){ return !e.isVacance && !e.isMultiday; });
+      var multidayDayEvts = dayEvts.filter(function(e){ return  e.isMultiday && !e.isVacance; });
 
       // ---- Couleur de fond (priorité : week-end > GE > école) -------------
       var isSchoolVac = vacEvts.length > 0;
@@ -408,8 +481,38 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       hAligns[ri][colDay]    = "left";
       vAligns[ri][colDay]    = "middle";
 
-      // ---- Texte de l'événement --------------------------------------------
-      var textParts = [];
+      // ---- Pistes multiday actives ce jour ------------------------------------
+      var activeTracks   = {};
+      var maxActiveTrack = 0;
+      multidayDayEvts.forEach(function(e) {
+        var key   = getEventKey_(e);
+        var track = monthTracks[key];
+        if (track && track <= EVT_COLS) {
+          activeTracks[track] = e;
+          if (track > maxActiveTrack) maxActiveTrack = track;
+        }
+      });
+      monthTrackCounts[m][d - 1] = maxActiveTrack;
+
+      for (var t = 1; t <= maxActiveTrack; t++) {
+        var tColIdx = colEvt + t - 1;
+        var tEvt    = activeTracks[t];
+        if (tEvt) {
+          backgrounds[ri][tColIdx] = multidayColorMap[getEventKey_(tEvt)];
+          if (isFirstWeekdayOfVacInMonth_(dateObj, tEvt, mo.month)) {
+            values[ri][tColIdx]    = tEvt.displayTitle;
+            fontSizes[ri][tColIdx] = fontSizeForLength_(tEvt.displayTitle.length);
+            wraps[ri][tColIdx]     = true;
+            hAligns[ri][tColIdx]   = "left";
+            vAligns[ri][tColIdx]   = "middle";
+          }
+        }
+        // gap track : le fond par défaut déjà posé reste intact
+      }
+
+      // ---- Zone restante : événements mono-jour -------------------------------
+      var colRemaining = colEvt + maxActiveTrack;
+      var textParts    = [];
 
       if (vacEvts.length > 0) {
         if (isFirstWeekdayOfVacInMonth_(dateObj, vacEvts[0], mo.month)) {
@@ -420,11 +523,11 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
       if (textParts.length > 0) {
         var text = textParts.join(" / ");
-        values[ri][colEvt]     = text;
-        fontSizes[ri][colEvt]  = fontSizeForLength_(text.length);
-        wraps[ri][colEvt]      = true;
-        hAligns[ri][colEvt]    = "left";
-        vAligns[ri][colEvt]    = "middle";
+        values[ri][colRemaining]    = text;
+        fontSizes[ri][colRemaining] = fontSizeForLength_(text.length);
+        wraps[ri][colRemaining]     = true;
+        hAligns[ri][colRemaining]   = "left";
+        vAligns[ri][colRemaining]   = "middle";
       }
     }
   }
@@ -452,8 +555,20 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   sheet.getRange(TITLE_ROW, 1, 1, NUM_COLS).merge();
   for (var m = 0; m < NUM_MONTHS; m++) {
     sheet.getRange(HEADER_ROW, m * COLS_PER_MONTH + 1, 1, COLS_PER_MONTH).merge();
-    // mergeAcross fusionne chaque ligne indépendamment → 1 appel API pour 31 lignes
-    sheet.getRange(DATA_START, m * COLS_PER_MONTH + 2, DAY_ROWS, EVT_COLS).mergeAcross();
+    // Regroupe les lignes consécutives avec le même nombre de pistes pour
+    // minimiser les appels API (mergeAcross par plage homogène).
+    var d = 0;
+    while (d < DAY_ROWS) {
+      var maxTrack  = monthTrackCounts[m][d] || 0;
+      var remaining = EVT_COLS - maxTrack;
+      var runEnd    = d + 1;
+      while (runEnd < DAY_ROWS && (monthTrackCounts[m][runEnd] || 0) === maxTrack) runEnd++;
+      if (remaining >= 2) {
+        sheet.getRange(DATA_START + d, m * COLS_PER_MONTH + maxTrack + 2, runEnd - d, remaining)
+             .mergeAcross();
+      }
+      d = runEnd;
+    }
   }
 
   // ── Bordures (une seule plage) ────────────────────────────────────────────
@@ -559,6 +674,7 @@ function collectCalendarEvents_(calId, startDate, endDate) {
         displayTitle : parsed.displayTitle,
         horsAnnuel   : parsed.horsAnnuel,
         isVacance    : parsed.isVacance,
+        isMultiday   : parsed.isMultiday,
         levels       : parsed.levels,
         startDate    : evtStartDate,
         endDate      : evtEndDate
@@ -586,6 +702,9 @@ function parseDescription_(desc, rawTitle) {
   // #vacances
   if (/#vacances\b/i.test(desc)) isVacance = true;
 
+  // #multiday
+  var isMultiday = /#multiday\b/i.test(desc);
+
   // #compact:texte court
   var compactMatch = desc.match(/#compact:([^#\n\r]+)/i);
   if (compactMatch) compactTitle = compactMatch[1].trim();
@@ -598,7 +717,7 @@ function parseDescription_(desc, rawTitle) {
   // Titre affiché = compact si dispo, sinon titre brut
   var displayTitle = compactTitle || rawTitle;
 
-  return { horsAnnuel: horsAnnuel, isVacance: isVacance, levels: levels, displayTitle: displayTitle };
+  return { horsAnnuel: horsAnnuel, isVacance: isVacance, isMultiday: isMultiday, levels: levels, displayTitle: displayTitle };
 }
 
 // ============================================================================
