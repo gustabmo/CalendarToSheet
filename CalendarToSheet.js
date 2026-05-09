@@ -348,10 +348,10 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   }
 
   // ── Hauteurs de lignes (peu d'appels, pas de gain à batcher) ────────────
-  sheet.setRowHeight(TITLE_ROW,  28);
-  sheet.setRowHeight(HEADER_ROW, 20);
+  sheet.setRowHeight(TITLE_ROW,  45);
+  sheet.setRowHeight(HEADER_ROW, 32);
   for (var r = DATA_START; r < DATA_START + DAY_ROWS; r++) {
-    sheet.setRowHeight(r, 18);
+    sheet.setRowHeight(r, 29);
   }
 
   // ── Largeurs de colonnes ─────────────────────────────────────────────────
@@ -618,38 +618,54 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // Légende — week-end volontairement omis : le bleu est suffisamment intuitif
   // et sa présence alourdirait la légende sans apporter d'information utile.
   var legendRow = DATA_START + DAY_ROWS + 1;
-  sheet.setRowHeight(legendRow, 16);
+
+  // saut de ligne avant la légende pour aérer un peu
+  sheet.setRowHeight(legendRow - 1, 10);
+  sheet.getRange(legendRow - 1, 1, 1, NUM_COLS)
+    .merge();
+
+  sheet.setRowHeight(legendRow, 25);
 
   let nextCol=1
 
   // "Légende" label
-  sheet.getRange(legendRow, nextCol+1)
+  sheet.getRange(legendRow, nextCol, 1, COLS_PER_MONTH)
+    .merge()
     .setValue("Légende :").setFontWeight("bold").setFontSize(9);
-  nextCol += 2;
+  nextCol += COLS_PER_MONTH;
 
   // Colored badge + label for each vacation type, side by side starting col 2
   [
     [COLOR_GE_VACATION,  "Vacances cantonales GE"],
     [COLOR_OWN_VACATION, "Vacances propres à l'école"]
   ].forEach(function(item, i) {
-    sheet.getRange(legendRow, nextCol )
+    sheet.getRange(legendRow, nextCol, 1, COLS_PER_MONTH )
+      .merge()
+      .setBackground(item[0])
       .setValue(item[1]).setFontSize(7)
       .setVerticalAlignment("middle");
-    sheet.getRange(legendRow, nextCol, 1, 2 )
-      .setBackground(item[0])
-    nextCol += 2;
+    nextCol += COLS_PER_MONTH;
   });
+
+  sheet.getRange(legendRow, nextCol, 1, COLS_PER_MONTH )
+    .merge();
+  nextCol += COLS_PER_MONTH;
 
   // "Dernière mise à jour" — timestamp of this tab's generation
   var now       = new Date();
   var pad       = function(n){ return String(n).padStart(2, "0"); };
   var timestamp =  pad(now.getDate()) + "-" + pad(now.getMonth()+1) + "-" + now.getFullYear() +
                   " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
-  sheet.getRange(legendRow, nextCol+1)
+  sheet.getRange(legendRow, nextCol,1,COLS_PER_MONTH*2)
+    .merge()
     .setValue("Dernière mise à jour : " + timestamp)
     .setFontSize(8).setFontStyle("italic").setFontColor("#888888")
     .setVerticalAlignment("middle");
-  nextCol += 2;
+  nextCol += COLS_PER_MONTH*2;
+
+  sheet.getRange(legendRow, nextCol, 1, NUM_COLS-nextCol+1 )
+    .merge();
+
 
   sheet.setFrozenRows(2);
   protectSheet_(sheet);
