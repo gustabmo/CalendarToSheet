@@ -1,26 +1,29 @@
-// 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel and claude.ai
-
+// 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel and claude.ai - first version
+//
 // Goal: to creat several different versions of yearly calendars based on events that 
 // are on google calendars Public / Parents / Profs
-
+//
 // =============================================================================
-// CALENDRIER SCOLAIRE — Google Apps Script  v4
+// CALENDRIER SCOLAIRE — Google Apps Script
 // À attacher à un fichier Google Sheets.
 // Menu : Calendrier
 //
 // Onglets générés (script-managed, ne pas modifier manuellement) :
 //   "[année] Public"            — calendrier public
-//   "[année] Parents"           — événements non tagués (tous niveaux)
-//   "[année] Parents JE"        — parents + événements #jardindenfants
-//   "[année] Parents Prim"      — parents + événements #primaire
-//   "[année] Parents Sec1"      — parents + événements #secondaire1
-//   "[année] Parents Sec2"      — parents + événements #secondaire2
-//   "[année] Profs JE"          — parents JE + événements #jardindenfants du cal. profs
-//   "[année] Profs Prim"        — parents Prim + événements #primaire du cal. profs
-//   "[année] Profs Sec1"        — parents Sec1 + événements #secondaire1 du cal. profs
-//   "[année] Profs Sec2"        — parents Sec2 + événements #secondaire2 du cal. profs
+//   "[année] Parents"           — public + parents, non-tagués ou #general
+//   "[année] Parents tout"      — public + parents, tout
+//   "[année] Parents JE"        — public + parents, #jardindenfants
+//   "[année] Parents Prim"      — public + parents, #primaire
+//   "[année] Parents Sec1"      — public + parents, #secondaire1
+//   "[année] Parents Sec2"      — public + parents, #secondaire2
+//   "[année] Profs"             — public + parents + profs, non-tagués ou #general
+//   "[année] Profs tout"        — public + parents + profs, tout
+//   "[année] Profs JE"          — public + parents + profs, #jardindenfants
+//   "[année] Profs Prim"        — public + parents + profs, #primaire
+//   "[année] Profs Sec1"        — public + parents + profs, #secondaire1
+//   "[année] Profs Sec2"        — public + parents + profs, #secondaire2
 // =============================================================================
-
+//
 // ================================================
 // CALENDRIER SCOLAIRE — notes pour session future
 //
@@ -28,41 +31,31 @@
 // École à Genève (francophone). 3 calendriers : public, parents, professeurs.
 // Niveaux : jardindenfants, primaire, secondaire1, secondaire2.
 //
-// Tags dans le champ "description" des événements Google Calendar :
-//   #vacances           → colore la cellule en orange clair
+// Tags dans le champ "description" des événements Google Calendar, function parseDescription_() :
+//   #vacances           → colore la cellule en COLOR_OWN_VACATION
+//   #vacancesDIP[:dd.mm.yyyy-dd.mm.yyyy] → colore la cellule en COLOR_GE_VACATION
 //   #compact:texte      → titre court pour la grille
 //   #jardindenfants / #primaire / #secondaire1 / #secondaire2  → filtre par niveau
-//   Pas de tag niveau   → apparaît sur tous les onglets
+//   Pas de tag niveau   → voir "non-tagués" sur la description des tabs
+//   #general            → a un tag de niveau mais apparait quand même avec les non-tagués
+//   #horsAnnuel         → n'apparait pas sur ces calendriers
+//   #multiday
+//   
 //
 // ── RÈGLE DES COULEURS DE FOND (priorité décroissante) ───────────────────
 //   1. BLEU        (COLOR_WEEKEND)      — samedi et dimanche
 //   2. ORANGE FONCÉ (COLOR_GE_VACATION) — jours sans école dans le calendrier
-//                                         officiel DIP / Canton de Genève :
-//                                           • Périodes de vacances scolaires
-//                                             (automne, Noël, février, Pâques, été)
-//                                           • Jours fériés officiels GE chômés
-//                                             à l'école : Jeûne genevois, Fête du
-//                                             travail, Ascension, Lundi de Pentecôte,
-//                                             Restauration de la République (31 déc),
-//                                             Nouvel An, Vendredi-Saint, Lundi de
-//                                             Pâques, Fête nationale (1er août), Noël
-//                                           • Ponts accordés par le DIP
-//                                             (ex. Pont de l'Ascension = jeudi+vendredi)
-//                                         Source : https://www.ge.ch/vacances-scolaires-jours-feries
-//                                         Scraped chaque génération depuis les pages
-//                                         "vacances-scolaires-YYYY-YYYY" et
-//                                         "jours-feries-officiels-2023-2027"
+//                                         officiel DIP / Canton de Genève
+//                                         voir #vacancesDIP
 //   3. ORANGE CLAIR (COLOR_OWN_VACATION) — jours de congé supplémentaires propres
 //                                          à notre école (marqués #vacances dans
 //                                          le calendrier Google "parents" ou "public")
 //                                          Notre école est un SUPERSET du calendrier
 //                                          GE : tous les jours GE sont off + quelques
 //                                          jours additionnels propres à notre école.
-//
-// Les jours GE sont récupérés automatiquement si FETCH_GE_VACANCES = TRUE.
 // ── FIN RÈGLE COULEURS ───────────────────────────────────────────────────
 // ================================================
-
+//
 // ============================================================================
 // CONFIG SHEET LAYOUT  (onglet nommé "Config")
 //
@@ -74,7 +67,7 @@
 //
 // ── PARAMÈTRES (colonnes D–E) ─────────────────────────────────────────────
 //   Clé (col D)             Valeur (col E)
-//   FETCH_GE_VACANCES       TRUE  ou  FALSE
+//   FETCH_GE_VACANCES       TRUE  ou  FALSE ... caduque!
 //
 // ── ANNÉES SCOLAIRES (colonnes G–J) ──────────────────────────────────────
 //   Ligne 1 : en-têtes (ignorés)
@@ -184,17 +177,32 @@ function generateAllViewsForYear_(ss, year, config) {
 
   var label = year.label;
 
-  // ── 1. Public (public uniquement, tous événements) ──────────────────────
+  // ── "[année] Public"            — calendrier public
   generateSheet_(ss, label + " Public", year, geVacations,
     mergeEventMaps_([calPublic]),
-    { mode: "général" });
+    { mode: "public" });
 
-  // ── 2. Parents général (public + parents, événements NON tagués niveau) ──
+  // "[année] Parents"           — public + parents, non-tagués ou #general
   generateSheet_(ss, label + " Parents", year, geVacations,
     mergeEventMaps_([calPublic, calParents]),
     { mode: "parents-général" });
 
-  // ── 3–6. Parents par niveau ───────────────────────────────────────────────
+  // "[année] Parents tout"      — public + parents, tout
+  generateSheet_(ss, label + " Parents tout", year, geVacations,
+    mergeEventMaps_([calPublic, calParents]),
+    { mode: "parents-tout" });
+
+  // "[année] Profs"             — public + parents + profs, non-tagués ou #general
+  generateSheet_(ss, label + " Profs", year, geVacations,
+    mergeEventMaps_([calPublic, calParents, calProfs]),
+    { mode: "profs-général" });
+
+  // "[année] Profs tout"        — public + parents + profs, tout
+  generateSheet_(ss, label + " Profs tout", year, geVacations,
+    mergeEventMaps_([calPublic, calParents, calProfs]),
+    { mode: "profs-tout" });
+
+  // "[année] Parents [niveau]"        — public + parents, #[niveau]
   LEVEL_KEYS.forEach(function(levelKey) {
     var suffix = LEVELS[levelKey];
     generateSheet_(ss, label + " Parents " + suffix, year, geVacations,
@@ -202,7 +210,7 @@ function generateAllViewsForYear_(ss, year, config) {
       { mode: "parents-niveau", level: levelKey });
   });
 
-  // ── 7–10. Profs par niveau ────────────────────────────────────────────────
+  // "[année] Profs [niveau]"          — public + parents + profs, #[niveau]
   LEVEL_KEYS.forEach(function(levelKey) {
     var suffix = LEVELS[levelKey];
     generateSheet_(ss, label + " Profs " + suffix, year, geVacations,
@@ -215,12 +223,6 @@ function generateAllViewsForYear_(ss, year, config) {
 // ============================================================================
 // RÈGLES DE VISIBILITÉ D'UN ÉVÉNEMENT SELON LE MODE DE L'ONGLET
 //
-// Modes :
-//   "général"        — calendrier public, tout passe
-//   "parents-général"— public + parents, uniquement événements SANS tag de niveau
-//   "parents-niveau" — public + parents, événements sans tag OU avec ce niveau
-//   "profs-niveau"   — public + parents + profs, idem parents-niveau
-//
 // Retourne : false = invisible | true = visible
 // ============================================================================
 function isEventVisible_(evt, viewCfg) {
@@ -229,12 +231,15 @@ function isEventVisible_(evt, viewCfg) {
   var hasLevelTag = evt.levels.length > 0;
 
   switch (viewCfg.mode) {
-    case "général":
+    case "public":
+    case "parents-tout":
+    case "profs-tout":
       return true;
 
     case "parents-général":
+    case "profs-général":
       // Uniquement les événements sans aucun tag de niveau
-      return !hasLevelTag;
+      return !hasLevelTag || evt.isGeneral;
 
     case "parents-niveau":
     case "profs-niveau":
@@ -740,12 +745,7 @@ function collectCalendarEvents_(calId, startDate, endDate) {
 
 // ============================================================================
 // PARSE LA DESCRIPTION D'UN ÉVÉNEMENT
-// Tags reconnus :
-//   #vacances                          → COLOR_OWN_VACATION
-//   #vacancesDIP                       → COLOR_GE_VACATION
-//   #vacancesDIP:dd.mm.yyyy-dd.mm.yyyy → COLOR_OWN_VACATION pour l'événement,
-//                                        + plage GE_VACATION aux dates indiquées
-//   #multiday, #horsAnnuel, #compact:texte, #jardindenfants, etc.
+// Tags reconnus : voire Tags dans le champ "description" des événements Google Calendar : 
 // ============================================================================
 function parseDescription_(desc, rawTitle) {
   var horsAnnuel   = false;
@@ -781,6 +781,9 @@ function parseDescription_(desc, rawTitle) {
   // #multiday
   var isMultiday = /#multiday\b/i.test(desc);
 
+  // #multiday
+  var isGeneral = /#g[eé]n[eé]ral\b/i.test(desc);
+
   // #compact:texte court
   var compactMatch = desc.match(/#compact:([^#\n\r]+)/i);
   if (compactMatch) compactTitle = compactMatch[1].trim();
@@ -792,8 +795,12 @@ function parseDescription_(desc, rawTitle) {
 
   var displayTitle = compactTitle || rawTitle;
 
-  return { horsAnnuel: horsAnnuel, isVacance: isVacance, isVacanceDIP: isVacanceDIP,
-           geDates: geDates, isMultiday: isMultiday, levels: levels, displayTitle: displayTitle };
+  return { 
+    horsAnnuel: horsAnnuel,  isMultiday: isMultiday,
+    isVacance: isVacance,  isVacanceDIP: isVacanceDIP,  geDates: geDates, 
+    levels: levels,  isGeneral: isGeneral, 
+    displayTitle: displayTitle 
+  };
 }
 
 // ============================================================================
