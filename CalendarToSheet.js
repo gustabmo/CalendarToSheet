@@ -1,83 +1,99 @@
-// 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel and claude.ai - first version
-//
-// Goal: to creat several different versions of yearly calendars based on events that 
-// are on google calendars Public / Parents / Profs
-//
-// =============================================================================
-// CALENDRIER SCOLAIRE — Google Apps Script
-// À attacher à un fichier Google Sheets.
-// Menu : Calendrier
-//
-// Onglets générés (script-managed, ne pas modifier manuellement) :
-//   "[année] Public"            — calendrier public
-//   "[année] Parents"           — public + parents, non-tagués ou #general
-//   "[année] Parents tout"      — public + parents, tout
-//   "[année] Parents JE"        — public + parents, #jardindenfants
-//   "[année] Parents Prim"      — public + parents, #primaire
-//   "[année] Parents Sec1"      — public + parents, #secondaire1
-//   "[année] Parents Sec2"      — public + parents, #secondaire2
-//   "[année] Profs"             — public + parents + profs, non-tagués ou #general
-//   "[année] Profs tout"        — public + parents + profs, tout
-//   "[année] Profs JE"          — public + parents + profs, #jardindenfants
-//   "[année] Profs Prim"        — public + parents + profs, #primaire
-//   "[année] Profs Sec1"        — public + parents + profs, #secondaire1
-//   "[année] Profs Sec2"        — public + parents + profs, #secondaire2
-// =============================================================================
-//
-// ================================================
-// CALENDRIER SCOLAIRE — notes pour session future
-//
-// Contexte : Google Apps Script attaché à un Google Sheets.
-// École à Genève (francophone). 3 calendriers : public, parents, professeurs.
-// Niveaux : jardindenfants, primaire, secondaire1, secondaire2.
-//
-// Tags dans le champ "description" des événements Google Calendar, function parseDescription_() :
-//   #vacances           → colore la cellule en COLOR_OWN_VACATION
-//   #vacancesDIP[:dd.mm.yyyy-dd.mm.yyyy] → colore la cellule en COLOR_GE_VACATION
-//   #compact:texte      → titre court pour la grille
-//   #jardindenfants / #primaire / #secondaire1 / #secondaire2  → filtre par niveau
-//   Pas de tag niveau   → voir "non-tagués" sur la description des tabs
-//   #general            → a un tag de niveau mais apparait quand même avec les non-tagués
-//   #horsAnnuel         → n'apparait pas sur ces calendriers
-//   #multiday
-//   
-//
-// ── RÈGLE DES COULEURS DE FOND (priorité décroissante) ───────────────────
-//   1. BLEU        (COLOR_WEEKEND)      — samedi et dimanche
-//   2. ORANGE FONCÉ (COLOR_GE_VACATION) — jours sans école dans le calendrier
-//                                         officiel DIP / Canton de Genève
-//                                         voir #vacancesDIP
-//   3. ORANGE CLAIR (COLOR_OWN_VACATION) — jours de congé supplémentaires propres
-//                                          à notre école (marqués #vacances dans
-//                                          le calendrier Google "parents" ou "public")
-//                                          Notre école est un SUPERSET du calendrier
-//                                          GE : tous les jours GE sont off + quelques
-//                                          jours additionnels propres à notre école.
-// ── FIN RÈGLE COULEURS ───────────────────────────────────────────────────
-// ================================================
-//
-// ============================================================================
-// CONFIG SHEET LAYOUT  (onglet nommé "Config")
-//
-// ── CALENDRIERS (colonnes A–B) ────────────────────────────────────────────
-//   Ligne 1 : en-têtes (ignorés)
-//   Lignes 2+ :
-//     A : Rôle du calendrier    "public" | "parents" | "professeurs"
-//     B : Google Calendar ID    ex. "abc@group.calendar.google.com"
-//
-// ── PARAMÈTRES (colonnes D–E) ─────────────────────────────────────────────
-//   Clé (col D)             Valeur (col E)
-//   FETCH_GE_VACANCES       TRUE  ou  FALSE ... caduque!
-//
-// ── ANNÉES SCOLAIRES (colonnes G–J) ──────────────────────────────────────
-//   Ligne 1 : en-têtes (ignorés)
-//   Lignes 2+ :
-//     G : Libellé    ex. "2025-26"  → préfixe des noms d'onglets
-//     H : Début      ex. "2025-08-01"
-//     I : Fin        ex. "2026-08-31"
-//     J : Générer    laisser non-vide (ex. "X" ou "OUI") pour l'année à générer
-//                    → exactement UNE ligne doit avoir cette colonne non-vide
-// ============================================================================
+function HelpCalendrier() { return [
+[" 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel and claude.ai"],
+[""],
+[" Goal: to creat several different versions of yearly calendars based on events that "],
+[" are on google calendars Public / Parents / Profs"],
+[""],
+[" ⚠️ Les onglets générés sont gérés par le script. Ne pas les modifier manuellement.        "],
+[""],
+[" ============================================================================="],
+[" CALENDRIER SCOLAIRE — Google Apps Script"],
+[" À attacher à un fichier Google Sheets."],
+[" Menu : Calendrier"],
+[""],
+[" Onglets générés (script-managed, ne pas modifier manuellement) :"],
+["   \"[année] Public\"","",      "— calendrier public"],
+["   \"[année] Parents\"","",     "— public + parents, non-tagués ou #general"],
+["   \"[année] Parents tout\"","","— public + parents, tout"],
+["   \"[année] Parents JE\"","",  "— public + parents, #jardindenfants"],
+["   \"[année] Parents Prim\"","","— public + parents, #primaire"],
+["   \"[année] Parents Sec1\"","","— public + parents, #secondaire1"],
+["   \"[année] Parents Sec2\"","","— public + parents, #secondaire2"],
+["   \"[année] Profs\"","",       "— public + parents + profs, non-tagués ou #general"],
+["   \"[année] Profs tout\"","",  "— public + parents + profs, tout"],
+["   \"[année] Profs JE\"","",    "— public + parents + profs, #jardindenfants"],
+["   \"[année] Profs Prim\"","",  "— public + parents + profs, #primaire"],
+["   \"[année] Profs Sec1\"","",  "— public + parents + profs, #secondaire1"],
+["   \"[année] Profs Sec2\"","",  "— public + parents + profs, #secondaire2"],
+[" ============================================================================="],
+[""],
+[" ================================================"],
+[" CALENDRIER SCOLAIRE — notes pour session future"],
+[""],
+[" Contexte : Google Apps Script attaché à un Google Sheets."],
+[" École à Genève (francophone). 3 calendriers : public, parents, professeurs."],
+[" Niveaux : jardindenfants, primaire, secondaire1, secondaire2."],
+[""],
+[" Tags dans le champ \"description\" des événements Google Calendar, function parseDescription_() :"],
+["#vacances","","→ colore la cellule en COLOR_OWN_VACATION"],
+["#vacancesDIP[:dd.mm.yyyy-dd.mm.yyyy]","","→ colore la cellule en COLOR_GE_VACATION"],
+["#compact:texte","","→ titre court pour la grille"],
+["#jardindenfants","","→ filtre par niveau"],
+["#primaire","","→ filtre par niveau"],
+["#secondaire1","","→ filtre par niveau"],
+["#secondaire2","","→ filtre par niveau"],
+["Pas de tag niveau","","→ voir \"non-tagués\" sur la description des tabs"],
+["#general","","→ s'il y a un tag de niveau mais doit apparaitre quand même avec les non-tagués"],
+["#horsAnnuel","","→ n'apparait pas sur ces calendriers"],
+["#multiday","","→ composition en couleurs pour indiquer plusieurs jours"],
+["   "],
+[""],
+[" ── RÈGLE DES COULEURS DE FOND (priorité décroissante) ───────────────────"],
+["   1. BLEU        (COLOR_WEEKEND)      — samedi et dimanche"],
+["   2. ORANGE FONCÉ (COLOR_GE_VACATION) — jours sans école dans le calendrier"],
+["                                         officiel DIP / Canton de Genève"],
+["                                         voir #vacancesDIP"],
+["   3. ORANGE CLAIR (COLOR_OWN_VACATION) — jours de congé supplémentaires propres"],
+["                                          à notre école (marqués #vacances dans"],
+["                                          le calendrier Google \"parents\" ou \"public\")"],
+["                                          Notre école est un SUPERSET du calendrier"],
+["                                          GE : tous les jours GE sont off + quelques"],
+["                                          jours additionnels propres à notre école."],
+[" ── FIN RÈGLE COULEURS ───────────────────────────────────────────────────"],
+[" ================================================"],
+[""],
+[" ============================================================================"],
+[" CONFIG SHEET LAYOUT  (onglet nommé \"Config\")"],
+[""],
+[" ── CALENDRIERS (colonnes A–B) ────────────────────────────────────────────"],
+["   Ligne 1 : en-têtes (ignorés)"],
+["   Lignes 2+ :"],
+["     A : Rôle du calendrier    \"public\" | \"parents\" | \"professeurs\""],
+["     B : Google Calendar ID    ex. \"abc@group.calendar.google.com\""],
+[""],
+[" ── PARAMÈTRES (colonnes D–E) ─────────────────────────────────────────────"],
+["   Clé (col D)             Valeur (col E)"],
+["   FETCH_GE_VACANCES       TRUE  ou  FALSE ... caduque!"],
+[""],
+[" ── ANNÉES SCOLAIRES (colonnes G–J) ──────────────────────────────────────"],
+["   Ligne 1 : en-têtes (ignorés)"],
+["   Lignes 2+ :"],
+["     G : Libellé    ex. \"2025-26\"  → préfixe des noms d'onglets"],
+["     H : Début      ex. \"2025-08-01\""],
+["     I : Fin        ex. \"2026-08-31\""],
+["     J : Générer    laisser non-vide (ex. \"X\" ou \"OUI\") pour l'année à générer"],
+["                    → exactement UNE ligne doit avoir cette colonne non-vide"],
+[""],
+["Exemple (à copier/coller sur la cellule A1 du tab Config):"],
+["Rôle calendrier","Google Calendar ID","","Paramètre","Valeur","","Libellé année","Début","Fin","Générer"],
+["public","ge47rrjmsg842p5egdmduk2na5@group.calendar.google.com","","","","","2025-26","2025-08-01","2026-08-31",""],
+["parents","hhrbl7abueg635n5680cb6gsap@group.calendar.google.com","","","","","2026-27","2026-08-01","2027-08-31","x"],
+["professeurs","0tc508umt0hgkodbcj9el9jk4c@group.calendar.google.com","","","","","2027-28","2027-08-01","2028-08-31",""],
+["","","","","","","2028-29","2028-08-01","2029-08-31",""],
+["","","","","","","2029-30","2029-08-01","2030-08-31",""],
+[" ============================================================================"]
+]}
+
 
 // ---- Palette de couleurs ---------------------------------------------------
 var COLOR_WEEKEND        = "#C9DAF8";  // bleu — week-ends
