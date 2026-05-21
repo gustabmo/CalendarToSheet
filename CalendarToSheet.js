@@ -1,5 +1,5 @@
 function HelpCalendrier() { return [
-[" 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel and claude.ai"],
+[" 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel guexel@gmail.com and claude.ai"],
 [""],
 [" Goal: to creat several different versions of yearly calendars based on events that "],
 [" are on google calendars Public / Parents / Profs"],
