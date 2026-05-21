@@ -136,7 +136,7 @@ var LEVEL_KEYS = ["jardindenfants", "primaire", "secondaire1", "secondaire2"];
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Calendrier")
-    .addItem("Générer les onglets (année marquée dans Config)", "generateMarkedYear")
+    .addItem("Générer les onglets", "generateMarkedYear")
     // .addSeparator()
     // .addItem("Initialiser l'onglet Config", "setupConfigSheet")
     .addToUi();
