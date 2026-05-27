@@ -539,18 +539,28 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
       var totalCompeting = startingTextTrackIdxs.length + (hasText ? 1 : 0);
       var normalAreaCols = 0;
-      if (totalCompeting > 0 && remaining > 0) {
-        var baseShare = Math.floor(remaining / totalCompeting);
-        var extra = remaining % totalCompeting;
-        // Allocate to starting tracks (left-to-right)
-        startingTextTrackIdxs.forEach(function(idx) {
-          trackWidths[idx] += baseShare;
-          if (extra > 0) { trackWidths[idx]++; extra--; }
-        });
-        // Allocate remaining share to normal text area if present
-        if (hasText) {
-          normalAreaCols = baseShare + (extra > 0 ? 1 : 0);
-          extra = Math.max(0, extra - (extra > 0 ? 1 : 0));
+      if (totalCompeting > 0) {
+        // Non-starting tracks occupy 1 column each and are not part of the
+        // competition for extra space. Compute how many columns remain to be
+        // split evenly among the competing items (starting tracks + normal area).
+        var nonStarting = maxActiveTrack - startingTextTrackIdxs.length;
+        var available = EVT_COLS - nonStarting; // columns available to distribute
+        if (available <= 0) {
+          // nothing to distribute; all tracks keep width 1
+        } else {
+          var baseShare = Math.floor(available / totalCompeting);
+          var extra = available % totalCompeting;
+          // Assign widths for starting tracks (overwrite the initial 1)
+          startingTextTrackIdxs.forEach(function(idx) {
+            var w = baseShare + (extra > 0 ? 1 : 0);
+            trackWidths[idx] = w;
+            if (extra > 0) extra--;
+          });
+          // Assign width for normal text area if present
+          if (hasText) {
+            normalAreaCols = baseShare + (extra > 0 ? 1 : 0);
+            if (extra > 0) extra--;
+          }
         }
       }
 
