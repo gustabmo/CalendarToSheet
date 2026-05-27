@@ -627,17 +627,31 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
       // 1-based column of first event column for this month
       var col = m * COLS_PER_MONTH + 2;
-      // Merge each track's allocated width
-      for (var ti = 0; ti < widths.length; ti++) {
-        var w = widths[ti] || 1;
-        if (w > 1) {
-          sheet.getRange(DATA_START + d, col, 1, w).merge();
+      // Merge contiguous columns that share the same background colour.
+      // This merges adjacent single-column tracks when they have the same
+      // day-level/background colour (weekend, vacation, or default).
+      var ri = DATA_START + d; // 1-based row for getRange
+      var runStart = col;
+      var prevBg = backgrounds[ri - 1][col - 1]; // may be null
+      var runLen = 1;
+      for (var ec = 1; ec < EVT_COLS; ec++) {
+        var curBg = backgrounds[ri - 1][col - 1 + ec];
+        var same = (curBg === prevBg) || (curBg == null && prevBg == null);
+        if (same) {
+          runLen++;
+        } else {
+          if (runLen > 1) {
+            sheet.getRange(ri, runStart, 1, runLen).merge();
+          }
+          // start new run
+          runStart = col + ec;
+          prevBg = curBg;
+          runLen = 1;
         }
-        col += w;
       }
-      // Merge normal/text area if it spans multiple columns
-      if (normalCols >= 2) {
-        sheet.getRange(DATA_START + d, col, 1, normalCols).merge();
+      // finalize last run
+      if (runLen > 1) {
+        sheet.getRange(ri, runStart, 1, runLen).merge();
       }
       d++;
     }
