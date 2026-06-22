@@ -147,9 +147,9 @@ var SUBLEVEL_KEYS = {
   "primaire":       [],
   "secondaire1":    ["classe7","classe8","classe9"],
   "secondaire2":    [],
-  "classe7":        [],
-  "classe8":        [],
-  "classe9":        [],
+  "classe7":        ["secondaire1"],
+  "classe8":        ["secondaire1"],
+  "classe9":        ["secondaire1"],
 };
 
 // ============================================================================
