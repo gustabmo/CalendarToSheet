@@ -371,11 +371,10 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   }
 
   // ── Largeurs de colonnes ─────────────────────────────────────────────────
-  var evtColWidths = [15, 15, 15, 15, 14, 14]; // 6 cols summing to 88px
   for (var m = 0; m < NUM_MONTHS; m++) {
-    sheet.setColumnWidth(m * COLS_PER_MONTH + 1, 26);
+    sheet.setColumnWidth(m * COLS_PER_MONTH + 1, 20);
     for (var ec = 0; ec < EVT_COLS; ec++) {
-      sheet.setColumnWidth(m * COLS_PER_MONTH + 2 + ec, evtColWidths[ec]);
+      sheet.setColumnWidth(m * COLS_PER_MONTH + 2 + ec, 16);
     }
   }
 
@@ -499,7 +498,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       // ---- Numéro du jour --------------------------------------------------
       values[ri][colDay]     = d;
       fontSizes[ri][colDay]  = 8;
-      hAligns[ri][colDay]    = "left";
+      hAligns[ri][colDay]    = "center";
       vAligns[ri][colDay]    = "middle";
 
       // ---- Pistes multiday actives ce jour ------------------------------------
