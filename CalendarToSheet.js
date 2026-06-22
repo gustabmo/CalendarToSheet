@@ -17,13 +17,19 @@ function HelpCalendrier() { return [
 ["   \"[année] Parents tout\"","","— public + parents, tout"],
 ["   \"[année] Parents JE\"","",  "— public + parents, #jardindenfants"],
 ["   \"[année] Parents Prim\"","","— public + parents, #primaire"],
-["   \"[année] Parents Sec1\"","","— public + parents, #secondaire1"],
+["   \"[année] Parents Sec1\"","","— public + parents, #secondaire1 or #classe7 or #classe8 or #classe9"],
+["   \"[année] Parents 7e\"","","— public + parents, #classe7"],
+["   \"[année] Parents 8e\"","","— public + parents, #classe8"],
+["   \"[année] Parents 9e\"","","— public + parents, #classe9"],
 ["   \"[année] Parents Sec2\"","","— public + parents, #secondaire2"],
 ["   \"[année] Profs\"","",       "— public + parents + profs, non-tagués ou #general"],
 ["   \"[année] Profs tout\"","",  "— public + parents + profs, tout"],
 ["   \"[année] Profs JE\"","",    "— public + parents + profs, #jardindenfants"],
 ["   \"[année] Profs Prim\"","",  "— public + parents + profs, #primaire"],
-["   \"[année] Profs Sec1\"","",  "— public + parents + profs, #secondaire1"],
+["   \"[année] Profs Sec1\"","",  "— public + parents + profs, #secondaire1 ou #classe7 ou #classe8 ou #classe9"],
+["   \"[année] Profs 7e\"","",  "— public + parents + profs, #classe7"],
+["   \"[année] Profs 8e\"","",  "— public + parents + profs, #classe8"],
+["   \"[année] Profs 9e\"","",  "— public + parents + profs, #classe9"],
 ["   \"[année] Profs Sec2\"","",  "— public + parents + profs, #secondaire2"],
 [" ============================================================================="],
 [""],
@@ -33,6 +39,7 @@ function HelpCalendrier() { return [
 [" Contexte : Google Apps Script attaché à un Google Sheets."],
 [" École à Genève (francophone). 3 calendriers : public, parents, professeurs."],
 [" Niveaux : jardindenfants, primaire, secondaire1, secondaire2."],
+[" Sous-Niveaux de secondaire1: classe7, classe8, classe9"],
 [""],
 [" Tags dans le champ \"description\" des événements Google Calendar, function parseDescription_() :"],
 ["#vacances","","→ colore la cellule en COLOR_OWN_VACATION"],
@@ -42,6 +49,9 @@ function HelpCalendrier() { return [
 ["#primaire","","→ filtre par niveau"],
 ["#secondaire1","","→ filtre par niveau"],
 ["#secondaire2","","→ filtre par niveau"],
+["#classe7","","→ filtre par sous-niveau, sousdivision de #secondaire1"],
+["#classe8","","→ filtre par sous-niveau, sousdivision de #secondaire1"],
+["#classe9","","→ filtre par sous-niveau, sousdivision de #secondaire1"],
 ["Pas de tag niveau","","→ voir \"non-tagués\" sur la description des tabs"],
 ["#general","","→ s'il y a un tag de niveau mais doit apparaitre quand même avec les non-tagués"],
 ["#horsAnnuel","","→ n'apparait pas sur ces calendriers"],
@@ -126,9 +136,21 @@ var LEVELS = {
   "jardindenfants": "JE",
   "primaire":       "Prim",
   "secondaire1":    "Sec1",
-  "secondaire2":    "Sec2"
+  "secondaire2":    "Sec2",
+  "classe7":        "7e",
+  "classe8":        "8e",
+  "classe9":        "9e",
 };
-var LEVEL_KEYS = ["jardindenfants", "primaire", "secondaire1", "secondaire2"];
+var LEVEL_KEYS = ["jardindenfants", "primaire", "secondaire1", "secondaire2","classe7","classe8","classe9"];
+var SUBLEVEL_KEYS = {
+  "jardindenfants": [],
+  "primaire":       [],
+  "secondaire1":    ["classe7","classe8","classe9"],
+  "secondaire2":    [],
+  "classe7":        [],
+  "classe8":        [],
+  "classe9":        [],
+};
 
 // ============================================================================
 // MENU
@@ -223,7 +245,7 @@ function generateAllViewsForYear_(ss, year, config) {
     var suffix = LEVELS[levelKey];
     generateSheet_(ss, label + " Parents " + suffix, year, geVacations,
       mergeEventMaps_([calPublic, calParents]),
-      { mode: "parents-niveau", level: levelKey });
+      { mode: "parents-niveau", level: levelKey, sublevels: SUBLEVEL_KEYS[levelKey] });
   });
 
   // "[année] Profs [niveau]"          — public + parents + profs, #[niveau]
@@ -231,7 +253,7 @@ function generateAllViewsForYear_(ss, year, config) {
     var suffix = LEVELS[levelKey];
     generateSheet_(ss, label + " Profs " + suffix, year, geVacations,
       mergeEventMaps_([calPublic, calParents, calProfs]),
-      { mode: "profs-niveau", level: levelKey });
+      { mode: "profs-niveau", level: levelKey, sublevels: SUBLEVEL_KEYS[levelKey] });
   });
 
 }
@@ -259,8 +281,16 @@ function isEventVisible_(evt, viewCfg) {
 
     case "parents-niveau":
     case "profs-niveau":
-      // Visible si pas de tag de niveau, ou si ce niveau est parmi les tags
-      return !hasLevelTag || evt.levels.indexOf(viewCfg.level) !== -1;
+      // Visible si pas de tag de niveau, ou si ce niveau est parmi les tags, ou si un des sous-niveaux sont parmi les tags
+      return (
+        !hasLevelTag
+        || 
+        evt.levels.includes(viewCfg.level)
+        || 
+        (viewCfg.sublevels?.some(
+          sublevel => evt.levels.includes(sublevel)
+        ))
+      );
   }
   return false;
 }
@@ -789,6 +819,7 @@ function collectCalendarEvents_(calId, startDate, endDate) {
         geDates      : parsed.geDates,
         isMultiday   : parsed.isMultiday,
         levels       : parsed.levels,
+        isGeneral    : parsed.isGeneral,
         startDate    : evtStartDate,
         endDate      : evtEndDate
       });
