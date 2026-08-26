@@ -718,7 +718,8 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   // "Légende" label
   sheet.getRange(legendRow, nextCol, 1, COLS_PER_MONTH)
     .merge()
-    .setValue("Légende :").setFontWeight("bold").setFontSize(9);
+    .setValue("Légende :").setFontWeight("bold").setFontSize(9)
+    .setVerticalAlignment("middle").setHorizontalAlignement("right");
   nextCol += COLS_PER_MONTH;
 
   // Colored badge + label for each vacation type, side by side starting col 2
