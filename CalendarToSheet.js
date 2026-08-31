@@ -115,12 +115,11 @@ var COLOR_NODAY_BG       = "#EFEFEF";  // jours inexistants (ex. 31 février)
 
 // ---- Couleurs des pistes multiday (6 teintes de vert) ----------------------
 var TRACK_COLORS = [
-  "#2E7D32",  // 1 vert foncé
-  "#66BB6A",  // 2 vert moyen
-  "#26A69A",  // 3 vert-sarcelle
-  "#AED581",  // 4 vert-jaune
-  "#80DEEA",  // 5 cyan clair
-  "#C8E6C9"   // 6 vert très clair
+  "#66BB6A",  // vert moyen
+  "#26A69A",  // vert-sarcelle
+  "#AED581",  // vert-jaune
+  "#80DEEA",  // cyan clair
+  "#C8E6C9"   // vert très clair
 ];
 
 // ---- Seuils de taille de police (en nombre de caractères du texte affiché) -
@@ -158,11 +157,17 @@ var SUBLEVEL_KEYS = {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Calendrier")
-    .addItem("Générer les onglets", "generateMarkedYear")
+    .addItem("Générer les onglets", "generateMarkedYearWithUI")
     // .addSeparator()
     // .addItem("Initialiser l'onglet Config", "setupConfigSheet")
     .addToUi();
 }
+
+
+function generateMarkedYearWithUI() {
+  generateMarkedYear ( SpreadsheetApp.getUi() );  
+}
+
 
 // ============================================================================
 // GÉNÉRATION DEPUIS LA CONFIG (colonne J)
@@ -170,18 +175,17 @@ function onOpen() {
 // Exactement une ligne doit avoir une valeur non-vide dans J.
 // Erreur si zéro ou plus d'une ligne est marquée.
 // ============================================================================
-function generateMarkedYear() {
+function generateMarkedYear(ui) {
   var ss     = SpreadsheetApp.getActiveSpreadsheet();
-  var config = readConfig_(ss);
+  var config = readConfig_(ui,ss);
   if (!config) return;
-
-  var ui = SpreadsheetApp.getUi();
 
   // Filtre les années ayant la colonne "Générer" non-vide
   var marked = config.years.filter(function(y) { return y.generate; });
 
   if (marked.length === 0) {
-    ui.alert(
+    console.log ( "Erreur : aucune année à générer" );
+    if (ui) ui.alert(
       "Erreur : aucune année à générer.\n\n" +
       "Mettez une valeur (ex. « X ») dans la colonne J (Générer) " +
       "de l'année souhaitée dans l'onglet Config."
@@ -189,7 +193,8 @@ function generateMarkedYear() {
     return;
   }
   if (marked.length > 1) {
-    ui.alert(
+    console.log ( "Erreur : plusieurs années marquées pour génération" );
+    if (ui) ui.alert(
       "Erreur : plusieurs années marquées pour génération (" +
       marked.map(function(y){ return y.label; }).join(", ") + ").\n\n" +
       "Ne laissez qu'une seule valeur non-vide dans la colonne J (Générer)."
@@ -719,7 +724,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   sheet.getRange(legendRow, nextCol, 1, COLS_PER_MONTH)
     .merge()
     .setValue("Légende :").setFontWeight("bold").setFontSize(9)
-    .setVerticalAlignment("middle").setHorizontalAlignement("right");
+    .setVerticalAlignment("middle").setHorizontalAlignment("right");
   nextCol += COLS_PER_MONTH;
 
   // Colored badge + label for each vacation type, side by side starting col 2
@@ -972,10 +977,12 @@ function deduplicateDates_(ranges) {
 // ============================================================================
 // LIRE LA CONFIG
 // ============================================================================
-function readConfig_(ss) {
+function readConfig_(ui,ss) {
   var cfgSheet = ss.getSheetByName("Config");
   if (!cfgSheet) {
-    SpreadsheetApp.getUi().alert('Onglet "Config" introuvable.\nUtilisez Calendrier → Initialiser l\'onglet Config.');
+    var sterror = 'Onglet "Config" introuvable.';
+    console.log ( sterror );
+    if (ui) ui.alert(sterror);
     return null;
   }
   var data = cfgSheet.getDataRange().getValues();
