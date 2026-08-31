@@ -1,7 +1,7 @@
 function HelpCalendrier() { return [
 [" 2026-05-02 CalendarToSheet.js(.gs) by Gustavo Exel guexel@gmail.com and claude.ai"],
 [""],
-[" Goal: to creat several different versions of yearly calendars based on events that "],
+[" Goal: to create several different versions of yearly calendars based on events that "],
 [" are on google calendars Public / Parents / Profs"],
 [""],
 [" ⚠️ Les onglets générés sont gérés par le script. Ne pas les modifier manuellement.        "],
@@ -101,7 +101,8 @@ function HelpCalendrier() { return [
 ["professeurs","0tc508umt0hgkodbcj9el9jk4c@group.calendar.google.com","","","","","2027-28","2027-08-01","2028-08-31",""],
 ["","","","","","","2028-29","2028-08-01","2029-08-31",""],
 ["","","","","","","2029-30","2029-08-01","2030-08-31",""],
-[" ============================================================================"]
+[" ============================================================================"],
+["Créer aussi une cellule avec '=helpcalendrier()' pour ce texte d'aide"]
 ]}
 
 
@@ -184,7 +185,7 @@ function generateMarkedYear(ui) {
   var marked = config.years.filter(function(y) { return y.generate; });
 
   if (marked.length === 0) {
-    console.log ( "Erreur : aucune année à générer" );
+    console.error ( "Erreur : aucune année à générer" );
     if (ui) ui.alert(
       "Erreur : aucune année à générer.\n\n" +
       "Mettez une valeur (ex. « X ») dans la colonne J (Générer) " +
@@ -193,7 +194,7 @@ function generateMarkedYear(ui) {
     return;
   }
   if (marked.length > 1) {
-    console.log ( "Erreur : plusieurs années marquées pour génération" );
+    console.error ( "Erreur : plusieurs années marquées pour génération" );
     if (ui) ui.alert(
       "Erreur : plusieurs années marquées pour génération (" +
       marked.map(function(y){ return y.label; }).join(", ") + ").\n\n" +
@@ -216,7 +217,7 @@ function generateAllViewsForYear_(ss, year, config) {
 
   // Plages GE extraites des tags #vacancesDIP:dd.mm.yyyy-dd.mm.yyyy dans les événements
   var geVacations = extractGeVacationsFromEvents_([calPublic, calParents, calProfs]);
-  Logger.log("Plages GE extraites des calendriers : " + geVacations.length + " périodes");
+  console.log("Plages GE extraites des calendriers : " + geVacations.length + " périodes");
 
   var label = year.label;
 
@@ -786,10 +787,10 @@ function collectCalendarEvents_(calId, startDate, endDate) {
       ? CalendarApp.getDefaultCalendar()
       : CalendarApp.getCalendarById(calId);
   } catch(e) {
-    Logger.log("Impossible d'accéder au calendrier : " + calId + " — " + e.message);
+    console.error("Impossible d'accéder au calendrier : " + calId + " — " + e.message);
     return result;
   }
-  if (!cal) { Logger.log("Calendrier introuvable : " + calId); return result; }
+  if (!cal) { console.error("Calendrier introuvable : " + calId); return result; }
 
   var calEvents = cal.getEvents(startDate, endDate);
   calEvents.forEach(function(evt) {
@@ -981,7 +982,7 @@ function readConfig_(ui,ss) {
   var cfgSheet = ss.getSheetByName("Config");
   if (!cfgSheet) {
     var sterror = 'Onglet "Config" introuvable.';
-    console.log ( sterror );
+    console.error ( sterror );
     if (ui) ui.alert(sterror);
     return null;
   }
