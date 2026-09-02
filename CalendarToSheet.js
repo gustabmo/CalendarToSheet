@@ -117,10 +117,10 @@ var COLOR_NODAY_BG       = "#EFEFEF";  // jours inexistants (ex. 31 février)
 // ---- Couleurs des pistes multiday (6 teintes de vert) ----------------------
 var TRACK_COLORS = [
   "#66BB6A",  // vert moyen
-  "#26A69A",  // vert-sarcelle
   "#AED581",  // vert-jaune
   "#80DEEA",  // cyan clair
-  "#C8E6C9"   // vert très clair
+  "#C8E6C9",   // vert très clair
+  "#26A69A"  // vert-sarcelle
 ];
 
 // ---- Seuils de taille de police (en nombre de caractères du texte affiché) -
@@ -334,10 +334,27 @@ function collectMultidayEvents_(eventsMap, viewCfg) {
   return result;
 }
 
-function buildMultidayColorMap_(multidayEvts) {
+function buildMultidayColorMap_(multidayEvts, monthTrackAssignments) {
   var map = {};
-  multidayEvts.forEach(function(evt, i) {
-    map[getEventKey_(evt)] = TRACK_COLORS[i % TRACK_COLORS.length];
+  var maxTrackByEvent = {};
+
+  // Track numbers are per month and 1-based: 1 = first visible track, 2 = second
+  // overlapping track, etc. Only an actual overlap should advance the palette,
+  // so we keep the highest assigned track seen for that event across months.
+  (monthTrackAssignments || []).forEach(function(monthTracks) {
+    Object.keys(monthTracks).forEach(function(key) {
+      var track = Number(monthTracks[key]) || 1;
+      if (!maxTrackByEvent[key] || track > maxTrackByEvent[key]) {
+        maxTrackByEvent[key] = track;
+      }
+    });
+  });
+
+  multidayEvts.forEach(function(evt) {
+    var key = getEventKey_(evt);
+    var track = maxTrackByEvent[key] || 1;
+    var paletteIndex = Math.max(0, track - 1);
+    map[key] = TRACK_COLORS[paletteIndex % TRACK_COLORS.length];
   });
   return map;
 }
@@ -459,11 +476,19 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   backgrounds[TITLE_RI][0] = "#FFFFFF";
 
   // ── Prétraitement des événements multiday ────────────────────────────────
-  var multidayEvts     = collectMultidayEvents_(events, viewCfg);
-  var multidayColorMap = buildMultidayColorMap_(multidayEvts);
-  var monthTrackCounts        = [];  // [m][d0] = nb de pistes actives
-  var monthDayTrackWidths    = [];  // [m][d0] = array of widths (cols) allocated to each track
-  var monthDayNormalCols     = [];  // [m][d0] = number of columns allocated to the normal/text area
+  var multidayEvts = collectMultidayEvents_(events, viewCfg);
+  var monthTrackAssignments = [];
+  for (var m = 0; m < NUM_MONTHS; m++) {
+    var mo = months[m];
+    var monthStart = new Date(mo.year, mo.month, 1);
+    var nextMonthStart = new Date(mo.year, mo.month + 1, 1);
+    monthTrackAssignments.push(assignTracksForMonth_(multidayEvts, monthStart, nextMonthStart));
+  }
+  var multidayColorMap = buildMultidayColorMap_(multidayEvts, monthTrackAssignments);
+
+  var monthTrackCounts      = [];  // [m][d0] = nb de pistes actives
+  var monthDayTrackWidths   = [];  // [m][d0] = array of widths (cols) allocated to each track
+  var monthDayNormalCols    = [];  // [m][d0] = number of columns allocated to the normal/text area
 
   // ── Calcul des cellules par mois ─────────────────────────────────────────
   for (var m = 0; m < NUM_MONTHS; m++) {
@@ -473,7 +498,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
     var monthStart     = new Date(mo.year, mo.month, 1);
     var nextMonthStart = new Date(mo.year, mo.month + 1, 1);
-    var monthTracks    = assignTracksForMonth_(multidayEvts, monthStart, nextMonthStart);
+    var monthTracks    = monthTrackAssignments[m];
     monthTrackCounts[m]        = new Array(DAY_ROWS).fill(0);
     monthDayTrackWidths[m]     = new Array(DAY_ROWS);
     monthDayNormalCols[m]      = new Array(DAY_ROWS).fill(0);
