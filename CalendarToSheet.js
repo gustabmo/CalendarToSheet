@@ -885,6 +885,13 @@ function collectCalendarEvents_(calId, startDate, endDate) {
 // Tags reconnus : voire Tags dans le champ "description" des événements Google Calendar : 
 // ============================================================================
 function parseDescription_(desc, rawTitle) {
+  var plainDesc = desc
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>\s*<p[^>]*>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
   var horsAnnuel   = false;
   var isVacance    = false;
   var isVacanceDIP = false;
@@ -894,10 +901,10 @@ function parseDescription_(desc, rawTitle) {
   var url           = null;
 
   // #horsAnnuel
-  if (/#horsAnnuel\b/i.test(desc)) horsAnnuel = true;
+  if (/#horsAnnuel\b/i.test(plainDesc)) horsAnnuel = true;
 
   // #vacancesDIP:dd.mm.yyyy-dd.mm.yyyy  →  OWN_VACATION + plage GE aux dates du tag
-  var dipRangeMatch = desc.match(/#vacancesDIP:(\d{2}\.\d{2}\.\d{4})-(\d{2}\.\d{2}\.\d{4})/i);
+  var dipRangeMatch = plainDesc.match(/#vacancesDIP:(\d{2}\.\d{2}\.\d{4})-(\d{2}\.\d{2}\.\d{4})/i);
   if (dipRangeMatch) {
     isVacance = true;
     var parseDmy = function(s) {
@@ -907,32 +914,31 @@ function parseDescription_(desc, rawTitle) {
     var geEnd   = parseDmy(dipRangeMatch[2]);
     geEnd.setDate(geEnd.getDate() + 1);  // fin exclusive
     geDates = { start: geStart, end: geEnd };
-  } else if (/#vacancesDIP\b/i.test(desc)) {
+  } else if (/#vacancesDIP\b/i.test(plainDesc)) {
     // #vacancesDIP seul → GE_VACATION
     isVacance    = true;
     isVacanceDIP = true;
-  } else if (/#vacances\b/i.test(desc)) {
+  } else if (/#vacances\b/i.test(plainDesc)) {
     // #vacances → OWN_VACATION
     isVacance = true;
   }
 
   // #multiday
-  var isMultiday = /#multiday\b/i.test(desc);
+  var isMultiday = /#multiday\b/i.test(plainDesc);
 
   // #multiday
-  var isGeneral = /#g[eé]n[eé]ral\b/i.test(desc);
+  var isGeneral = /#g[eé]n[eé]ral\b/i.test(plainDesc);
 
   // #compact:texte court
-  var compactMatch = desc.match(/#compact:([^#\n\r]+)/i);
+  var compactMatch = plainDesc.match(/#compact:([^#\n\r]+)/i);
   if (compactMatch) compactTitle = compactMatch[1].trim();
 
-  // #url:https://example.org on its own line
-  var urlMatch = desc.match(/^\s*#url:\s*(\S+)\s*$/im);
-  if (urlMatch) url = urlMatch[1];
+  var urlMatch = desc.match(/#url:\s*(?:<a[^>]+href=["']([^"']+)["'][^>]*>[^<]*<\/a>|([^\s<]+))/i);
+  if (urlMatch) url = decodeHtmlEntities_(urlMatch[1] || urlMatch[2]);
 
   // Tags de niveaux
   LEVEL_KEYS.forEach(function(k) {
-    if (new RegExp("#" + k + "\\b", "i").test(desc)) levels.push(k);
+    if (new RegExp("#" + k + "\\b", "i").test(plainDesc)) levels.push(k);
   });
 
   var displayTitle = compactTitle || rawTitle;
@@ -943,6 +949,13 @@ function parseDescription_(desc, rawTitle) {
     levels: levels,  isGeneral: isGeneral, 
     displayTitle: displayTitle, url: url
   };
+}
+
+function decodeHtmlEntities_(text) {
+  return text
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
 }
 
 function buildRichTextValue_(parts) {
