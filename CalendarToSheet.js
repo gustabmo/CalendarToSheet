@@ -870,6 +870,7 @@ function collectCalendarEvents_(calId, startDate, endDate) {
         isMultiday   : parsed.isMultiday,
         levels       : parsed.levels,
         isGeneral    : parsed.isGeneral,
+        url          : parsed.url,
         startDate    : evtStartDate,
         endDate      : evtEndDate
       });
