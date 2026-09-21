@@ -934,7 +934,7 @@ function parseDescription_(desc, rawTitle) {
   var compactMatch = plainDesc.match(/#compact:([^#\n\r]+)/i);
   if (compactMatch) compactTitle = compactMatch[1].trim();
 
-  var urlMatch = desc.match(/#url:\s*(?:<a[^>]+href=["']([^"']+)["'][^>]*>[^<]*<\/a>|([^\s<]+))/i);
+  var urlMatch = desc.match(/#url:\s*(?:<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>|([^\s<]+))/i);
   if (urlMatch) url = decodeHtmlEntities_(urlMatch[1] || urlMatch[2]);
 
   // Tags de niveaux
