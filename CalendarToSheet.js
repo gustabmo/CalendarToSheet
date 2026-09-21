@@ -45,6 +45,7 @@ function HelpCalendrier() { return [
 ["#vacances","","→ colore la cellule en COLOR_OWN_VACATION"],
 ["#vacancesDIP[:dd.mm.yyyy-dd.mm.yyyy]","","→ colore la cellule en COLOR_GE_VACATION"],
 ["#compact:texte","","→ titre court pour la grille"],
+["#url:https://exemple.org","","→ ajoute un lien au texte de l'événement"],
 ["#jardindenfants","","→ filtre par niveau"],
 ["#primaire","","→ filtre par niveau"],
 ["#secondaire1","","→ filtre par niveau"],
@@ -441,6 +442,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   var vAligns    = [];   // "top" | "middle" | "bottom"
   var fontColors = [];   // foreground colour string
   var wraps      = [];   // true | false
+  var richTextParts = []; // event text fragments and their optional URLs
 
   for (var ri = 0; ri < TOTAL_ROWS; ri++) {
     values[ri]      = [];
@@ -451,6 +453,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
     vAligns[ri]     = [];
     fontColors[ri]  = [];
     wraps[ri]       = [];
+    richTextParts[ri] = [];
     for (var ci = 0; ci < NUM_COLS; ci++) {
       values[ri][ci]      = "";
       backgrounds[ri][ci] = null;      // null = keep default
@@ -460,6 +463,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       vAligns[ri][ci]     = "middle";
       fontColors[ri][ci]  = "#000000";
       wraps[ri][ci]       = false;
+      richTextParts[ri][ci] = null;
     }
   }
 
@@ -583,9 +587,11 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
 
       var textParts = [];
       if (vacEvts.length > 0 && isFirstWeekdayOfVacInMonth_(dateObj, vacEvts[0], mo.month)) {
-        textParts.push(vacEvts[0].displayTitle);
+        textParts.push({ text: vacEvts[0].displayTitle, url: vacEvts[0].url });
       }
-      normalEvts.forEach(function(e){ textParts.push(e.displayTitle); });
+      normalEvts.forEach(function(e){
+        textParts.push({ text: e.displayTitle, url: e.url });
+      });
       var hasText = textParts.length > 0;
 
       // Count how many multiday tracks start today and should show text
@@ -642,6 +648,7 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
           }
           if (isFirstWeekdayOfVacInMonth_(dateObj, tEvt, mo.month)) {
             values[ri][tColIdx]    = tEvt.displayTitle;
+            richTextParts[ri][tColIdx] = [{ text: tEvt.displayTitle, url: tEvt.url }];
             fontSizes[ri][tColIdx] = fontSizeForLength_(tEvt.displayTitle.length);
             wraps[ri][tColIdx]     = true;
             hAligns[ri][tColIdx]   = "left";
@@ -654,8 +661,9 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
       // ---- Normal text area after tracks
       if (hasText) {
         var normalColStart = colEvt + trackWidths.reduce(function(a,b){return a+b;}, 0);
-        var text = textParts.join(" / ");
+        var text = textParts.map(function(part){ return part.text; }).join(" / ");
         values[ri][normalColStart]      = text;
+        richTextParts[ri][normalColStart] = textParts;
         fontSizes[ri][normalColStart]   = fontSizeForLength_(text.length);
         wraps[ri][normalColStart]       = true;
         hAligns[ri][normalColStart]     = "left";
@@ -674,6 +682,16 @@ function generateSheet_(ss, sheetName, year, geVacations, events, viewCfg) {
   dataRange.setVerticalAlignments(vAligns);
   dataRange.setFontColors(fontColors);
   dataRange.setWraps(wraps);
+
+  // Apply links after the batch write so each event keeps its own text span.
+  for (var richRi = 0; richRi < TOTAL_ROWS; richRi++) {
+    for (var richCi = 0; richCi < NUM_COLS; richCi++) {
+      if (richTextParts[richRi][richCi]) {
+        dataRange.getCell(richRi + 1, richCi + 1)
+          .setRichTextValue(buildRichTextValue_(richTextParts[richRi][richCi]));
+      }
+    }
+  }
 
   // setBackgrounds ne peut pas recevoir null (contrairement aux autres setters
   // qui acceptent les valeurs par défaut). On remplace les null par la couleur
@@ -873,6 +891,7 @@ function parseDescription_(desc, rawTitle) {
   var geDates      = null;
   var levels       = [];
   var compactTitle = null;
+  var url           = null;
 
   // #horsAnnuel
   if (/#horsAnnuel\b/i.test(desc)) horsAnnuel = true;
@@ -907,6 +926,10 @@ function parseDescription_(desc, rawTitle) {
   var compactMatch = desc.match(/#compact:([^#\n\r]+)/i);
   if (compactMatch) compactTitle = compactMatch[1].trim();
 
+  // #url:https://example.org on its own line
+  var urlMatch = desc.match(/^\s*#url:\s*(\S+)\s*$/im);
+  if (urlMatch) url = urlMatch[1];
+
   // Tags de niveaux
   LEVEL_KEYS.forEach(function(k) {
     if (new RegExp("#" + k + "\\b", "i").test(desc)) levels.push(k);
@@ -918,8 +941,20 @@ function parseDescription_(desc, rawTitle) {
     horsAnnuel: horsAnnuel,  isMultiday: isMultiday,
     isVacance: isVacance,  isVacanceDIP: isVacanceDIP,  geDates: geDates, 
     levels: levels,  isGeneral: isGeneral, 
-    displayTitle: displayTitle 
+    displayTitle: displayTitle, url: url
   };
+}
+
+function buildRichTextValue_(parts) {
+  var text = parts.map(function(part) { return part.text; }).join(" / ");
+  var builder = SpreadsheetApp.newRichTextValue().setText(text);
+  var offset = 0;
+  parts.forEach(function(part, index) {
+    if (part.url) builder.setLinkUrl(offset, offset + part.text.length, part.url);
+    offset += part.text.length;
+    if (index < parts.length - 1) offset += 3; // " / "
+  });
+  return builder.build();
 }
 
 // ============================================================================
