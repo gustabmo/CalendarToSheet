@@ -117,8 +117,8 @@ var COLOR_NODAY_BG       = "#EFEFEF";  // jours inexistants (ex. 31 février)
 
 // ---- Couleurs des pistes multiday (6 teintes de vert) ----------------------
 var TRACK_COLORS = [
-  "#BBEE2F",
   "#90d499",
+  "#BBEE2F",
   "#89F496",
   "#90E0C0",
   "#C0E090"
