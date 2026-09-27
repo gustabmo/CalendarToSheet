@@ -117,11 +117,11 @@ var COLOR_NODAY_BG       = "#EFEFEF";  // jours inexistants (ex. 31 février)
 
 // ---- Couleurs des pistes multiday (6 teintes de vert) ----------------------
 var TRACK_COLORS = [
-  "#66BB6A",  // vert moyen
-  "#AED581",  // vert-jaune
-  "#80DEEA",  // cyan clair
-  "#C8E6C9",   // vert très clair
-  "#26A69A"  // vert-sarcelle
+  "#E2EFDA", 
+  "#C6EFCE", 
+  "#D2EBD9", 
+  "#DDEBF7", 
+  "#26A69A"  
 ];
 
 // ---- Seuils de taille de police (en nombre de caractères du texte affiché) -
